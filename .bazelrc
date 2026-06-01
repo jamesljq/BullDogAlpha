@@ -1,0 +1,16 @@
+# Global Bazel settings
+build --show_timestamps
+build --announce_rc
+build --cxxopt=-std=c++17
+build --host_cxxopt=-std=c++17
+
+# Python settings
+build --incompatible_default_to_explicit_init_py
+
+# Go settings - force pure Go compilation without CGO
+build --define=gotags=pure
+build --action_env=CGO_ENABLED=0
+
+# Sandbox and Hermeticity configuration
+test --test_output=errors
+test --sandbox_debug

@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package bulldog_alpha.proto;
+
+option go_package = "bulldog_alpha/proto/order";
+
+import "buf/validate/validate.proto";
+
+enum OrderSide {
+  ORDER_SIDE_UNSPECIFIED = 0;
+  BUY = 1;
+  SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  LIMIT = 1;
+  MARKET = 2;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  SUBMITTED = 2;
+  PARTIALLY_FILLED = 3;
+  FILLED = 4;
+  CANCELED = 5;
+  REJECTED = 6;
+}
+
+message OrderRequest {
+  string order_id = 1;
+  string symbol = 2 [(buf.validate.field).string.pattern = "^[A-Z]{1,5}$"];
+  double price = 3 [(buf.validate.field).double.gt = 0];
+  double quantity = 4 [(buf.validate.field).double.gt = 0];
+  OrderSide side = 5;
+  OrderType type = 6;
+  string correlation_id = 7;
+}
+
+message OrderResponse {
+  string order_id = 1;
+  OrderStatus status = 2;
+  string reason = 3;
+  string correlation_id = 4;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string correlation_id = 2;
+}
+
+message ForcePauseRequest {
+  string reason = 1;
+  string correlation_id = 2;
+}
+
+message ForcePauseResponse {
+  bool success = 1;
+  string correlation_id = 2;
+}
+
+message Position {
+  string symbol = 1;
+  double quantity = 2;
+  double average_entry_price = 3;
+}
+
+service OrderService {
+  rpc SubmitOrder(OrderRequest) returns (OrderResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (OrderResponse);
+}
+
+service ControlService {
+  rpc ForcePause(ForcePauseRequest) returns (ForcePauseResponse);
+}

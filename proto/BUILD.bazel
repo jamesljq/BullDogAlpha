@@ -1,0 +1,76 @@
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@rules_go//go:def.bzl", "go_test")
+load("@rules_go//proto:def.bzl", "go_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load(":rules.bzl", "go_merge_choke_grpc")
+
+# Expose proto libraries
+proto_library(
+    name = "market_data_proto",
+    srcs = ["market_data.proto"],
+    visibility = ["//visibility:public"],
+)
+
+proto_library(
+    name = "order_proto",
+    srcs = ["order.proto"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@protovalidate//proto/protovalidate/buf/validate:validate_proto",
+    ],
+)
+
+# Go targets
+
+
+go_proto_library(
+    name = "market_data_go_proto",
+    importpath = "bulldog_alpha/proto/market_data",
+    proto = ":market_data_proto",
+    visibility = ["//visibility:public"],
+)
+
+go_merge_choke_grpc(
+    name = "go_merge_choke_grpc",
+    importpath = "bulldog_alpha/proto/order",
+    proto = ":order_proto",
+    visibility = ["//visibility:public"],
+    deps = ["@build_buf_gen_go_bufbuild_protovalidate_protocolbuffers_go//buf/validate:go_default_library"],
+)
+
+# Python targets
+
+
+py_proto_library(
+    name = "market_data_py_proto",
+    visibility = ["//visibility:public"],
+    deps = [":market_data_proto"],
+)
+
+py_proto_library(
+    name = "order_py_proto",
+    visibility = ["//visibility:public"],
+    deps = [":order_proto"],
+)
+
+go_test(
+    name = "go_proto_test",
+    srcs = ["order_test.go"],
+    deps = [
+        ":go_merge_choke_grpc",
+        "@build_buf_go_protovalidate//:protovalidate",
+    ],
+)
+
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "py_proto_test",
+    srcs = ["order_test.py"],
+    main = "order_test.py",
+    deps = [
+        ":market_data_py_proto",
+        ":order_py_proto",
+    ],
+    imports = [".."],
+)

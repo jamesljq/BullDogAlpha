@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package bulldog_alpha.proto;
+
+option go_package = "bulldog_alpha/proto/market_data";
+
+message EquityTick {
+  string symbol = 1;
+  double price = 2;
+  double size = 3;
+  int64 timestamp = 4; // Millisecond Unix timestamp
+  string correlation_id = 5; // Global unique trace ID
+}
+
+message EquityBar {
+  string symbol = 1;
+  double open = 2;
+  double high = 3;
+  double low = 4;
+  double close = 5;
+  double volume = 6;
+  int64 window_size = 7; // Size in seconds (e.g. 60)
+  int64 timestamp = 8; // Start millisecond timestamp of the bar
+}

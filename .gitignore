@@ -104,3 +104,6 @@ Thumbs.db
 
 # WithOne config folders
 .one/
+
+# Bazel
+/bazel-*
