@@ -51,17 +51,17 @@ graph TD
     order_proto --> validate_proto
 
     %% Go Target Path
-    go_merge_choke_grpc["go_merge_choke_grpc(//proto:go_merge_choke_grpc)"]
+    order_go_proto["go_proto_library(//proto:order_go_proto)"]
     market_data_go_proto["go_proto_library(//proto:market_data_go_proto)"]
     validate_go_library["@build_buf_gen_go_bufbuild_protovalidate_protocolbuffers_go//buf/validate:go_default_library"]
 
-    go_merge_choke_grpc --> order_proto
-    go_merge_choke_grpc --> validate_go_library
+    order_go_proto --> order_proto
+    order_go_proto --> validate_go_library
     market_data_go_proto --> market_data_proto
 
     %% Go Test Target
     go_proto_test["go_test(//proto:go_proto_test)"]
-    go_proto_test --> go_merge_choke_grpc
+    go_proto_test --> order_go_proto
     go_proto_test --> |"Runtime Validator"| build_buf_go_protovalidate["@build_buf_go_protovalidate//:protovalidate"]
 
     %% Python Target Path
@@ -86,6 +86,6 @@ Since all targets build within the Bazel sandbox, outputs are populated in the v
 | Bazel Target | Generated File Location (from workspace root) | Target Platform / Package | Description |
 | :--- | :--- | :--- | :--- |
 | `//proto:market_data_go_proto` | `bazel-bin/proto/market_data_go_proto_/bulldog_alpha/proto/market_data/market_data.pb.go` | Go / `market_data` | Standard protobuf structures for market data |
-| `//proto:go_merge_choke_grpc` | `bazel-bin/proto/go_merge_choke_grpc_/bulldog_alpha/proto/order/order.pb.go` | Go / `order` | Protobuf messages and gRPC services (OrderService, ControlService) |
+| `//proto:order_go_proto` | `bazel-bin/proto/order_go_proto_/bulldog_alpha/proto/order/order.pb.go` | Go / `order` | Protobuf messages and gRPC services (OrderService, ControlService) |
 | `//proto:market_data_py_proto` | `bazel-bin/proto/market_data_pb2.py`<br>`bazel-bin/proto/market_data_pb2.pyi` | Python | Python message stub and typings stub for market data |
 | `//proto:order_py_proto` | `bazel-bin/proto/order_pb2.py`<br>`bazel-bin/proto/order_pb2.pyi` | Python | Python message stub and typings stub for order contracts |

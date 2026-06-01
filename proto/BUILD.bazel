@@ -2,7 +2,6 @@ load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_go//go:def.bzl", "go_test")
 load("@rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load(":rules.bzl", "go_merge_choke_grpc")
 
 # Expose proto libraries
 proto_library(
@@ -29,9 +28,9 @@ go_proto_library(
     proto = ":market_data_proto",
     visibility = ["//visibility:public"],
 )
-
-go_merge_choke_grpc(
-    name = "go_merge_choke_grpc",
+go_proto_library(
+    name = "order_go_proto",
+    compilers = ["@rules_go//proto:go_grpc"],
     importpath = "bulldog_alpha/proto/order",
     proto = ":order_proto",
     visibility = ["//visibility:public"],
@@ -57,7 +56,7 @@ go_test(
     name = "go_proto_test",
     srcs = ["order_test.go"],
     deps = [
-        ":go_merge_choke_grpc",
+        ":order_go_proto",
         "@build_buf_go_protovalidate//:protovalidate",
     ],
 )
