@@ -107,3 +107,13 @@ Thumbs.db
 
 # Bazel
 /bazel-*
+
+# Python
+.coverage
+htmlcov/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+

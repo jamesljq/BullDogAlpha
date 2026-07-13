@@ -1,0 +1,68 @@
+load("@pip//:requirements.bzl", "requirement")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "base",
+    srcs = ["strategies/base.py"],
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "features",
+    srcs = ["rl/features.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        requirement("numpy"),
+        requirement("polars"),
+    ],
+)
+
+py_library(
+    name = "env",
+    srcs = ["rl/env.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":base",
+        requirement("gymnasium"),
+        requirement("numpy"),
+    ],
+)
+
+py_library(
+    name = "strategies",
+    srcs = [
+        "strategies/rl_strategy.py",
+        "strategies/trend_strategy.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":base",
+        ":features",
+        requirement("numpy"),
+        requirement("onnxruntime"),
+    ],
+)
+
+py_library(
+    name = "engine",
+    srcs = ["engine.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":base",
+    ],
+)
+
+py_test(
+    name = "alpha_engine_test",
+    srcs = ["alpha_engine_test.py"],
+    deps = [
+        ":base",
+        ":features",
+        ":env",
+        ":strategies",
+        ":engine",
+        requirement("numpy"),
+        requirement("polars"),
+        requirement("gymnasium"),
+    ],
+)
