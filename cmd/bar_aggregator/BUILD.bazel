@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "bar_aggregator_lib",
+    srcs = ["main.go"],
+    importpath = "bulldog_alpha/cmd/bar_aggregator",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//proto:market_data_go_proto",
+        "@com_github_go_zeromq_zmq4//:zmq4",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
+
+go_binary(
+    name = "bar_aggregator",
+    embed = [":bar_aggregator_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "bar_aggregator_test",
+    srcs = ["main_test.go"],
+    embed = [":bar_aggregator_lib"],
+    deps = [
+        "//proto:market_data_go_proto",
+        "@com_github_go_zeromq_zmq4//:zmq4",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
