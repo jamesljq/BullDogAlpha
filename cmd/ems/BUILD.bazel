@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "ems_lib",
+    srcs = ["main.go"],
+    importpath = "bulldog_alpha/cmd/ems",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//cmd/ems/state",
+        "//proto:order_go_proto",
+        "@org_golang_google_grpc//:grpc",
+    ],
+)
+
+go_binary(
+    name = "ems",
+    embed = [":ems_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ems_test",
+    srcs = ["ems_test.go"],
+    embed = [":ems_lib"],
+    deps = [
+        "//cmd/ems/state",
+        "//proto:order_go_proto",
+    ],
+)
