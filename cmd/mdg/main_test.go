@@ -262,6 +262,10 @@ func TestMdgRunMainListenFailure(t *testing.T) {
 }
 
 func TestMdgRunMainSuccess(t *testing.T) {
+	oldHealthPort := *healthPort
+	*healthPort = "0"
+	defer func() { *healthPort = oldHealthPort }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
