@@ -11,6 +11,8 @@ import (
 	"syscall"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"bulldog_alpha/cmd/ems/state"
 	"bulldog_alpha/proto/order"
@@ -18,7 +20,13 @@ import (
 
 type EMSServer struct {
 	order.UnimplementedOrderServiceServer
+	order.UnimplementedControlServiceServer
 	SM *state.StateMachine
+}
+
+func (s *EMSServer) ForcePause(ctx context.Context, req *order.ForcePauseRequest) (*order.ForcePauseResponse, error) {
+	slog.Info("ems_force_pause_received", "reason", req.Reason)
+	return &order.ForcePauseResponse{Success: true, CorrelationId: req.CorrelationId}, nil
 }
 
 func (s *EMSServer) SubmitOrder(ctx context.Context, req *order.OrderRequest) (*order.OrderResponse, error) {
@@ -134,7 +142,13 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	order.RegisterOrderServiceServer(s, &EMSServer{SM: sm})
+	emsSrv := &EMSServer{SM: sm}
+	order.RegisterOrderServiceServer(s, emsSrv)
+	order.RegisterControlServiceServer(s, emsSrv)
+
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(s, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	go func() {
 		slog.Info("ems_grpc_server_listening", "port", *port)

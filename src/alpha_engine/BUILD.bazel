@@ -81,8 +81,8 @@ py_test(
     name = "backtest_test",
     srcs = ["backtest_test.py"],
     deps = [
-        ":base",
         ":backtest_driver",
+        ":base",
         requirement("polars"),
     ],
 )

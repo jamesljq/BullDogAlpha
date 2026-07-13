@@ -9,6 +9,8 @@ go_library(
         "//cmd/ems/state",
         "//proto:order_go_proto",
         "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//health",
+        "@org_golang_google_grpc//health/grpc_health_v1",
     ],
 )
 

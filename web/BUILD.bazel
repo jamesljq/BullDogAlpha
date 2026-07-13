@@ -1,0 +1,14 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "web_bazel_test",
+    srcs = ["web_bazel_test.py"],
+    data = [
+        "package.json",
+        "README.md",
+        "src/App.tsx",
+        "src/App.test.tsx",
+    ],
+    deps = [],
+    visibility = ["//visibility:public"],
+)

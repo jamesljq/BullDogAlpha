@@ -13,6 +13,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"bulldog_alpha/cmd/risk_node/interceptor"
 	"bulldog_alpha/proto/order"
@@ -89,6 +91,10 @@ func main() {
 		grpc.UnaryInterceptor(rn.RiskInterceptor),
 	)
 	order.RegisterOrderServiceServer(s, &Server{})
+
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(s, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	go func() {
 		slog.Info("grpc_server_listening", "port", *grpcPort)

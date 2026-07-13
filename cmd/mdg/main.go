@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-zeromq/zmq4"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -45,6 +49,7 @@ var (
 	polygonURL = flag.String("polygon-url", "ws://localhost:8080/polygon", "Polygon.io WebSocket connection URL")
 	apiKey     = flag.String("api-key", "", "API key token for Polygon.io authentication")
 	zmqAddr    = flag.String("zmq-addr", "tcp://*:5555", "ZeroMQ PUB socket binding address")
+	healthPort = flag.String("health-port", "50053", "gRPC health check server port")
 )
 
 // dialWebSocket wraps websocket.Dial to allow mocking in tests.
@@ -91,6 +96,22 @@ func runMain(ctx context.Context, wsURL, key, bindAddr string) error {
 		"polygon_url", wsURL,
 		"zmq_addr", bindAddr,
 		"component", "mdg")
+
+	// Initialize standard gRPC health check server
+	healthLis, err := net.Listen("tcp", ":"+*healthPort)
+	if err != nil {
+		return fmt.Errorf("failed to listen for gRPC health server: %w", err)
+	}
+	grpcServer := grpc.NewServer()
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	go func() {
+		if err := grpcServer.Serve(healthLis); err != nil {
+			slog.Error("gRPC health server failed", "error", err)
+		}
+	}()
+	defer grpcServer.GracefulStop()
 
 	// Initialize ZeroMQ PUB socket.
 	pubSocket := newPubSocket(ctx)

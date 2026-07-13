@@ -1,36 +1,38 @@
 load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 
 go_library(
-    name = "risk_node_lib",
+    name = "bff_lib",
     srcs = ["main.go"],
-    importpath = "bulldog_alpha/cmd/risk_node",
+    importpath = "bulldog_alpha/cmd/bff",
     visibility = ["//visibility:private"],
     deps = [
-        "//cmd/risk_node/interceptor",
         "//proto:order_go_proto",
-        "@com_github_prometheus_client_golang//prometheus/promhttp",
+        "@com_github_coder_websocket//:websocket",
         "@com_github_redis_go_redis_v9//:go-redis",
         "@org_golang_google_grpc//:grpc",
-        "@org_golang_google_grpc//health",
+        "@org_golang_google_grpc//credentials/insecure",
         "@org_golang_google_grpc//health/grpc_health_v1",
     ],
 )
 
 go_binary(
-    name = "risk_node",
-    embed = [":risk_node_lib"],
+    name = "bff",
+    embed = [":bff_lib"],
     visibility = ["//visibility:public"],
 )
 
 go_test(
-    name = "risk_node_test",
-    srcs = ["risk_node_test.go"],
-    embed = [":risk_node_lib"],
+    name = "bff_test",
+    srcs = ["main_test.go"],
+    embed = [":bff_lib"],
     deps = [
-        "//cmd/risk_node/interceptor",
         "//proto:order_go_proto",
         "@com_github_alicebob_miniredis_v2//:miniredis",
+        "@com_github_coder_websocket//:websocket",
         "@com_github_redis_go_redis_v9//:go-redis",
         "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//credentials/insecure",
+        "@org_golang_google_grpc//health",
+        "@org_golang_google_grpc//health/grpc_health_v1",
     ],
 )
