@@ -66,3 +66,23 @@ py_test(
         requirement("gymnasium"),
     ],
 )
+
+py_library(
+    name = "backtest_driver",
+    srcs = ["backtest_driver.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":base",
+        requirement("polars"),
+    ],
+)
+
+py_test(
+    name = "backtest_test",
+    srcs = ["backtest_test.py"],
+    deps = [
+        ":base",
+        ":backtest_driver",
+        requirement("polars"),
+    ],
+)
