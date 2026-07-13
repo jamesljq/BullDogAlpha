@@ -57,10 +57,10 @@ py_test(
     srcs = ["alpha_engine_test.py"],
     deps = [
         ":base",
-        ":features",
-        ":env",
-        ":strategies",
         ":engine",
+        ":env",
+        ":features",
+        ":strategies",
         requirement("numpy"),
         requirement("polars"),
         requirement("gymnasium"),
