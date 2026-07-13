@@ -1,0 +1,153 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"google.golang.org/grpc"
+
+	"bulldog_alpha/cmd/ems/state"
+	"bulldog_alpha/proto/order"
+)
+
+type EMSServer struct {
+	order.UnimplementedOrderServiceServer
+	SM *state.StateMachine
+}
+
+func (s *EMSServer) SubmitOrder(ctx context.Context, req *order.OrderRequest) (*order.OrderResponse, error) {
+	slog.Info("ems_submitting_order", "order_id", req.OrderId, "symbol", req.Symbol, "qty", req.Quantity, "price", req.Price)
+
+	runtime, idempotent, err := s.SM.SubmitOrder(ctx, req)
+	if err != nil {
+		slog.Error("ems_submit_failed", "order_id", req.OrderId, "error", err)
+		return &order.OrderResponse{
+			OrderId:       req.OrderId,
+			Status:        order.OrderStatus_REJECTED,
+			Reason:        err.Error(),
+			CorrelationId: req.CorrelationId,
+		}, nil
+	}
+
+	statusVal := order.OrderStatus_SUBMITTED
+	reason := "SUBMITTED"
+	if idempotent {
+		statusVal = runtime.GetState()
+		reason = "IDEMPOTENT_RETRY"
+	}
+
+	return &order.OrderResponse{
+		OrderId:       req.OrderId,
+		Status:        statusVal,
+		Reason:        reason,
+		CorrelationId: req.CorrelationId,
+	}, nil
+}
+
+func (s *EMSServer) CancelOrder(ctx context.Context, req *order.CancelOrderRequest) (*order.OrderResponse, error) {
+	slog.Info("ems_canceling_order", "order_id", req.OrderId)
+
+	runtime, exists := s.SM.GetOrder(req.OrderId)
+	if !exists {
+		return &order.OrderResponse{
+			OrderId:       req.OrderId,
+			Status:        order.OrderStatus_REJECTED,
+			Reason:        "ORDER_NOT_FOUND",
+			CorrelationId: req.CorrelationId,
+		}, nil
+	}
+
+	currentState := runtime.GetState()
+
+	if currentState == order.OrderStatus_FILLED || currentState == order.OrderStatus_CANCELED || currentState == order.OrderStatus_REJECTED {
+		return &order.OrderResponse{
+			OrderId:       req.OrderId,
+			Status:        currentState,
+			Reason:        "REJECTED_ALREADY_TERMINAL",
+			CorrelationId: req.CorrelationId,
+		}, nil
+	}
+
+	err := s.SM.TransitionState(ctx, req.OrderId, order.OrderStatus_PENDING_CANCEL, 0, req.CorrelationId)
+	if err != nil {
+		return &order.OrderResponse{
+			OrderId:       req.OrderId,
+			Status:        order.OrderStatus_REJECTED,
+			Reason:        fmt.Sprintf("failed to transition to PENDING_CANCEL: %v", err),
+			CorrelationId: req.CorrelationId,
+		}, nil
+	}
+
+	err = s.SM.TransitionState(ctx, req.OrderId, order.OrderStatus_CANCELED, 0, req.CorrelationId)
+	if err != nil {
+		return &order.OrderResponse{
+			OrderId:       req.OrderId,
+			Status:        order.OrderStatus_REJECTED,
+			Reason:        fmt.Sprintf("failed to transition to CANCELED: %v", err),
+			CorrelationId: req.CorrelationId,
+		}, nil
+	}
+
+	return &order.OrderResponse{
+		OrderId:       req.OrderId,
+		Status:        order.OrderStatus_CANCELED,
+		Reason:        "CANCELED",
+		CorrelationId: req.CorrelationId,
+	}, nil
+}
+
+func main() {
+	port := flag.String("port", "50052", "gRPC port")
+	walPath := flag.String("wal-path", "ems.wal", "Write-Ahead Log path")
+	flag.Parse()
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	slog.Info("starting_ems_service", "port", *port, "wal_path", *walPath)
+
+	wal, err := state.NewFileWAL(*walPath)
+	if err != nil {
+		slog.Error("failed_to_initialize_wal", "path", *walPath, "error", err)
+		os.Exit(1)
+	}
+
+	sm := state.NewStateMachine(wal)
+
+	slog.Info("replaying_wal_log")
+	if err := sm.RecoverFromWAL(); err != nil {
+		slog.Error("wal_replay_failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("wal_replay_completed")
+
+	lis, err := net.Listen("tcp", ":"+*port)
+	if err != nil {
+		slog.Error("failed_to_listen", "port", *port, "error", err)
+		os.Exit(1)
+	}
+
+	s := grpc.NewServer()
+	order.RegisterOrderServiceServer(s, &EMSServer{SM: sm})
+
+	go func() {
+		slog.Info("ems_grpc_server_listening", "port", *port)
+		if err := s.Serve(lis); err != nil {
+			slog.Error("ems_grpc_server_failed", "error", err)
+		}
+	}()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	slog.Info("shutting_down_ems_gracefully")
+	s.GracefulStop()
+	wal.Close()
+}

@@ -26,6 +26,7 @@ enum OrderStatus {
   FILLED = 4;
   CANCELED = 5;
   REJECTED = 6;
+  PENDING_CANCEL = 7;
 }
 
 message OrderRequest {
