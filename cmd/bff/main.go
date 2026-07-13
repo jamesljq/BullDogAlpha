@@ -43,6 +43,7 @@ type SystemStatusMsg struct {
 	State       CircuitBreakerState     `json:"state"`
 	SystemState string                  `json:"system_state"` // OK or DEGRADED
 	Services    map[string]HealthStatus `json:"services"`
+	DevMode     bool                    `json:"dev_mode"`
 }
 
 type BFFServer struct {
@@ -58,6 +59,7 @@ type BFFServer struct {
 
 	clientsMutex sync.Mutex
 	clients      map[WebSocketConn]context.CancelFunc
+	devMode      bool
 }
 
 type WebSocketConn interface {
@@ -85,6 +87,28 @@ func (r *realWS) Close(code websocket.StatusCode, reason string) error {
 
 func (r *realWS) Ping(ctx context.Context) error {
 	return r.Conn.Ping(ctx)
+}
+
+var osExit = os.Exit
+
+func (bff *BFFServer) HandleShutdownAPI(w http.ResponseWriter, r *http.Request) {
+	if !bff.devMode {
+		http.Error(w, "Developer mode not enabled", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	slog.Warn("developer_shutdown_triggered_exiting")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		osExit(0)
+	}()
 }
 
 func NewBFFServer(rdb *redis.Client, mdg, risk, ems, engine string) *BFFServer {
@@ -190,6 +214,7 @@ func (bff *BFFServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		State:       bff.getCircuitState(ctx),
 		SystemState: sysState,
 		Services:    services,
+		DevMode:     bff.devMode,
 	}
 	if initBytes, err := json.Marshal(initMsg); err == nil {
 		_ = ws.Write(ctx, websocket.MessageText, initBytes)
@@ -419,6 +444,7 @@ func (bff *BFFServer) broadcastStatus() {
 		State:       bff.getCircuitState(context.Background()),
 		SystemState: sysState,
 		Services:    services,
+		DevMode:     bff.devMode,
 	})
 }
 
@@ -509,6 +535,7 @@ type Config struct {
 	RiskAddr   string
 	EmsAddr    string
 	EngineAddr string
+	DevMode    bool
 }
 
 func runBFF(ctx context.Context, cfg Config) error {
@@ -518,6 +545,7 @@ func runBFF(ctx context.Context, cfg Config) error {
 	defer rdb.Close()
 
 	bff := NewBFFServer(rdb, cfg.MdgAddr, cfg.RiskAddr, cfg.EmsAddr, cfg.EngineAddr)
+	bff.devMode = cfg.DevMode
 
 	go bff.StartHealthCheckLoop(ctx)
 
@@ -526,6 +554,7 @@ func runBFF(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("/api/circuit", bff.HandleCircuitAPI)
 	mux.HandleFunc("/api/config", bff.HandleConfigAPI)
 	mux.HandleFunc("/api/state", bff.HandleStateAPI)
+	mux.HandleFunc("/api/shutdown", bff.HandleShutdownAPI)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -554,6 +583,7 @@ func main() {
 	riskAddr := flag.String("risk-addr", "localhost:50051", "Risk Node gRPC address")
 	emsAddr := flag.String("ems-addr", "localhost:50052", "EMS gRPC address")
 	engineAddr := flag.String("engine-addr", "localhost:50054", "Alpha Engine mock gRPC address")
+	devMode := flag.Bool("dev-mode", false, "Enable developer mode controls")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -571,6 +601,7 @@ func main() {
 		RiskAddr:   *riskAddr,
 		EmsAddr:    *emsAddr,
 		EngineAddr: *engineAddr,
+		DevMode:    *devMode,
 	}
 
 	if err := runBFF(ctx, cfg); err != nil {

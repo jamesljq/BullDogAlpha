@@ -11,6 +11,7 @@ interface SystemStatusMsg {
   state: "RUNNING" | "PAUSED" | "TERMINATED";
   system_state: "OK" | "DEGRADED";
   services: Record<string, HealthStatus>;
+  dev_mode?: boolean;
 }
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
   const [rlStrategyActive, setRlStrategyActive] = useState<boolean>(true);
   const [trendStrategyActive, setTrendStrategyActive] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [devMode, setDevMode] = useState<boolean>(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +77,9 @@ export default function App() {
           setSystemState(status.system_state);
           if (status.services) {
             setServices(status.services);
+          }
+          if (status.dev_mode !== undefined) {
+            setDevMode(status.dev_mode);
           }
           addLog(`State sync: Circuit=${status.state}, Health=${status.system_state}`);
         } else if (data.type === "config_update") {
@@ -323,6 +328,36 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {devMode && (
+            <div style={{ ...styles.card, marginTop: '24px', borderColor: '#ef4444' }}>
+              <h2 style={{ ...styles.cardTitle, color: '#ef4444' }}>Developer Modes & Control</h2>
+              <button 
+                onClick={async () => {
+                  addLog("Triggering physical platform shutdown API...");
+                  try {
+                    const resp = await fetch("/api/shutdown", { method: "POST" });
+                    if (resp.ok) {
+                      addLog("Shutdown signal accepted by BFF Gateway. Backend exiting...");
+                    } else {
+                      addLog("Failed to trigger shutdown API.");
+                    }
+                  } catch (err) {
+                    addLog(`Shutdown API error: ${err}`);
+                  }
+                }}
+                style={{
+                  ...styles.btn,
+                  background: "linear-gradient(135deg, #7f1d1d, #b91c1c)",
+                  color: "#fff",
+                  width: '100%',
+                  boxShadow: "0 0 10px rgba(239, 68, 68, 0.4)"
+                }}
+              >
+                🛑 SHUTDOWN ALL SERVICES
+              </button>
+            </div>
+          )}
         </section>
       </main>
 

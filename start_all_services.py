@@ -111,7 +111,7 @@ def main():
     }
     
     # Clean up commands list for bff gateway target execution mapping
-    components["BFFGateway"] = ["bazel", "run", "//cmd/bff", "--", "--port=8080", "--redis-addr=localhost:6379"]
+    components["BFFGateway"] = ["bazel", "run", "//cmd/bff", "--", "--port=8080", "--redis-addr=localhost:6379", "--dev-mode"]
 
     for name, cmd in components.items():
         print_log(name, f"Launching service via Bazel: {' '.join(cmd)}...", "info", BLUE)
@@ -161,6 +161,9 @@ def main():
         for name, proc in list(processes.items()):
             ret = proc.poll()
             if ret is not None:
+                if name == "BFFGateway":
+                    print_log("SYSTEM", "BFFGateway has exited. Shutting down all other services cleanly...", "warning", YELLOW)
+                    clean_shutdown(None, None)
                 print_log("SYSTEM", f"Warning: {name} (PID: {proc.pid}) exited unexpectedly with code {ret}.", "warning", RED)
                 # Keep checking log outputs
                 print_log("SYSTEM", f"Check {log_dir}/{name.lower()}.log for error details.", "warning", RED)
