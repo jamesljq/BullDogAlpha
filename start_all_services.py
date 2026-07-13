@@ -5,17 +5,12 @@ import time
 import subprocess
 import signal
 import shutil
+from absl import app
+from absl import flags
+from absl import logging
 
-try:
-    from absl import logging
-except ImportError:
-    import logging
-    # Setup basic logging to stderr in Abseil style
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(levelname).1s%(asctime)s %(filename)s:%(lineno)d] %(message)s',
-        datefmt='%m%d %H:%M:%S'
-    )
+FLAGS = flags.FLAGS
+flags.DEFINE_string("workspace_dir", "", "Path to the platform workspace directory. If empty, uses the script directory.")
 
 # Color definitions
 GREEN = "\033[92m"
@@ -70,8 +65,9 @@ def clean_shutdown(signum, frame):
 signal.signal(signal.SIGINT, clean_shutdown)
 signal.signal(signal.SIGTERM, clean_shutdown)
 
-def main():
-    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+def main(argv):
+    del argv  # Unused
+    workspace_dir = FLAGS.workspace_dir if FLAGS.workspace_dir else os.path.dirname(os.path.abspath(__file__))
     os.chdir(workspace_dir)
 
     # 1. Create logs directory
@@ -171,4 +167,4 @@ def main():
         time.sleep(2)
 
 if __name__ == "__main__":
-    main()
+    app.run(main)

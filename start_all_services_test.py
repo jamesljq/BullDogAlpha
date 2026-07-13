@@ -9,6 +9,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import start_all_services
 
 class TestStartAllServices(unittest.TestCase):
+    def setUp(self):
+        from absl import flags
+        try:
+            flags.FLAGS(['start_all_services.py'])
+        except Exception:
+            pass
+
     @patch('shutil.which')
     def test_check_command_exists(self, mock_which):
         mock_which.return_value = '/usr/local/bin/redis-server'
@@ -49,7 +56,7 @@ class TestStartAllServices(unittest.TestCase):
             # Run main, trigger SystemExit after launching all processes
             with patch('time.sleep', side_effect=mock_sleep):
                 with self.assertRaises(SystemExit):
-                    start_all_services.main()
+                    start_all_services.main(['start_all_services.py'])
         
         # Assert processes started
         self.assertTrue(mock_popen.called)
