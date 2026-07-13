@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "data_recorder_lib",
+    srcs = ["main.go"],
+    importpath = "bulldog_alpha/cmd/data_recorder",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//proto:market_data_go_proto",
+        "@com_github_go_zeromq_zmq4//:zmq4",
+        "@com_github_lib_pq//:pq",
+        "@com_github_parquet_go_parquet_go//:parquet-go",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
+
+go_binary(
+    name = "data_recorder",
+    embed = [":data_recorder_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "data_recorder_test",
+    srcs = ["main_test.go"],
+    embed = [":data_recorder_lib"],
+    deps = [
+        "//proto:market_data_go_proto",
+        "@com_github_data_dog_go_sqlmock//:go-sqlmock",
+        "@com_github_go_zeromq_zmq4//:zmq4",
+        "@com_github_parquet_go_parquet_go//:parquet-go",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
