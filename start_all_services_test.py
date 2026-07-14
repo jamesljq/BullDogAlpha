@@ -69,5 +69,60 @@ class TestStartAllServices(unittest.TestCase):
         self.assertTrue(any('//cmd/bff' in cmd for cmd in calls))
         self.assertIn(['npm', 'start'], calls)
 
+    @patch('sys.exit')
+    def test_clean_shutdown(self, mock_exit):
+        mock_proc = MagicMock()
+        mock_file = MagicMock()
+        
+        # Save old values
+        old_processes = start_all_services.processes
+        old_log_files = start_all_services.log_files
+        
+        try:
+            start_all_services.processes = {"MockService": mock_proc}
+            start_all_services.log_files = [mock_file]
+            
+            start_all_services.clean_shutdown(None, None)
+            
+            mock_proc.terminate.assert_called_once()
+            mock_file.close.assert_called_once()
+            mock_exit.assert_called_once_with(0)
+        finally:
+            start_all_services.processes = old_processes
+            start_all_services.log_files = old_log_files
+
+    @patch('start_all_services.clean_shutdown')
+    @patch('subprocess.Popen')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('os.makedirs')
+    @patch('socket.socket')
+    @patch('shutil.which')
+    def test_bff_exit_triggers_clean_shutdown(self, mock_which, mock_socket, mock_makedirs, mock_file, mock_popen, mock_clean_shutdown):
+        mock_which.return_value = '/usr/bin/mock'
+        
+        # Simulating Redis already running
+        mock_sock_inst = MagicMock()
+        mock_socket.return_value = mock_sock_inst
+        
+        # Mock Popen to return a process whose poll returns 0 only when it is BFFGateway
+        def mock_popen_fn(cmd, *args, **kwargs):
+            proc = MagicMock()
+            proc.pid = 9999
+            if any('//cmd/bff' in part for part in cmd):
+                proc.poll.return_value = 0
+            else:
+                proc.poll.return_value = None
+            return proc
+        mock_popen.side_effect = mock_popen_fn
+        
+        # Make clean_shutdown raise SystemExit to exit main's infinite loop
+        mock_clean_shutdown.side_effect = SystemExit()
+        
+        with patch('os.path.exists', return_value=True):
+            with self.assertRaises(SystemExit):
+                start_all_services.main(['start_all_services.py'])
+                
+        mock_clean_shutdown.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()
