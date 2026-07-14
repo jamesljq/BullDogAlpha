@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -171,11 +172,29 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key s
 
 	// Optional authentication step if API Key is supplied.
 	if key != "" {
-		authMsg := map[string]interface{}{
-			"action": "auth",
-			"params": key,
+		isAlpaca := strings.Contains(wsURL, "alpaca.markets")
+		var authBytes []byte
+		var err error
+
+		if isAlpaca {
+			parts := strings.Split(key, ":")
+			if len(parts) != 2 {
+				return fmt.Errorf("for Alpaca, api-key must be in the format 'KEY_ID:SECRET_KEY'")
+			}
+			authMsg := map[string]interface{}{
+				"action": "auth",
+				"key":    parts[0],
+				"secret": parts[1],
+			}
+			authBytes, err = json.Marshal(authMsg)
+		} else {
+			authMsg := map[string]interface{}{
+				"action": "auth",
+				"params": key,
+			}
+			authBytes, err = json.Marshal(authMsg)
 		}
-		authBytes, err := json.Marshal(authMsg)
+
 		if err != nil {
 			return fmt.Errorf("failed to marshal auth message: %w", err)
 		}
@@ -183,6 +202,57 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key s
 			return fmt.Errorf("failed to write auth message: %w", err)
 		}
 		slog.Info("Sent authentication message to server")
+
+		// Read the first response.
+		// If it's a real Polygon server, it sends a welcome status message first.
+		_, payload, err := conn.Read(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read welcome/auth status: %w", err)
+		}
+		slog.Info("Received first payload from server", "payload", string(payload))
+
+		if isAlpaca {
+			// For Alpaca, verify auth success in the response and send subscription
+			if strings.Contains(string(payload), "authenticated") || strings.Contains(string(payload), "success") {
+				subMsg := map[string]interface{}{
+					"action": "subscribe",
+					"trades": []string{"AAPL", "MSFT", "TSLA", "AMZN", "NVDA"},
+				}
+				subBytes, err := json.Marshal(subMsg)
+				if err != nil {
+					return fmt.Errorf("failed to marshal subscribe message: %w", err)
+				}
+				if err := conn.Write(ctx, websocket.MessageText, subBytes); err != nil {
+					return fmt.Errorf("failed to write subscribe message: %w", err)
+				}
+				slog.Info("Sent Alpaca stock trades subscription request for AAPL, MSFT, TSLA, AMZN, NVDA")
+			}
+		} else if strings.Contains(string(payload), "\"ev\":\"status\"") {
+			// Polygon status path
+			_, authPayload, err := conn.Read(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to read authentication status: %w", err)
+			}
+			slog.Info("Received authentication status from Polygon", "payload", string(authPayload))
+
+			// Send the subscribe message.
+			subMsg := map[string]interface{}{
+				"action": "subscribe",
+				"params": "T.AAPL,T.MSFT,T.TSLA,T.AMZN,T.NVDA",
+			}
+			subBytes, err := json.Marshal(subMsg)
+			if err != nil {
+				return fmt.Errorf("failed to marshal subscribe message: %w", err)
+			}
+			if err := conn.Write(ctx, websocket.MessageText, subBytes); err != nil {
+				return fmt.Errorf("failed to write subscribe message: %w", err)
+			}
+			slog.Info("Sent stock ticker subscription request for AAPL, MSFT, TSLA, AMZN, NVDA")
+		} else {
+			// If it's not a status event, it must be tick data from our unit test mock server.
+			slog.Info("First payload is not a status message; assuming test mock feed. Processing payload immediately.")
+			go processAndPublish(payload, pubSocket)
+		}
 	}
 
 	for {
@@ -216,18 +286,52 @@ func processAndPublish(payload []byte, pubSocket MessageSender) {
 	}
 
 	var rawTicks []RawTick
-	if payload[0] == '[' {
-		if err := json.Unmarshal(payload, &rawTicks); err != nil {
-			slog.Warn("Failed to unmarshal JSON array payload", "error", err, "payload", string(payload))
+
+	// Check if the payload is in Alpaca stock trade tick format (tagged with "T":"t")
+	if strings.Contains(string(payload), "\"T\":\"t\"") {
+		var alpacaTicks []struct {
+			Type      string  `json:"T"`
+			Symbol    string  `json:"S"`
+			Price     float64 `json:"p"`
+			Size      float64 `json:"s"`
+			Timestamp string  `json:"t"`
+		}
+		if err := json.Unmarshal(payload, &alpacaTicks); err != nil {
+			slog.Warn("Failed to unmarshal Alpaca tick array", "error", err, "payload", string(payload))
 			return
+		}
+		for _, at := range alpacaTicks {
+			if at.Type == "t" {
+				ts, err := time.Parse(time.RFC3339, at.Timestamp)
+				var msTimestamp int64
+				if err != nil {
+					msTimestamp = time.Now().UnixNano() / 1e6
+				} else {
+					msTimestamp = ts.UnixNano() / 1e6
+				}
+				rawTicks = append(rawTicks, RawTick{
+					Symbol:    at.Symbol,
+					Price:     at.Price,
+					Size:      at.Size,
+					Timestamp: msTimestamp,
+				})
+			}
 		}
 	} else {
-		var singleTick RawTick
-		if err := json.Unmarshal(payload, &singleTick); err != nil {
-			slog.Warn("Failed to unmarshal JSON object payload", "error", err, "payload", string(payload))
-			return
+		// Standard Polygon or Test Mock JSON format
+		if payload[0] == '[' {
+			if err := json.Unmarshal(payload, &rawTicks); err != nil {
+				slog.Warn("Failed to unmarshal JSON array payload", "error", err, "payload", string(payload))
+				return
+			}
+		} else {
+			var singleTick RawTick
+			if err := json.Unmarshal(payload, &singleTick); err != nil {
+				slog.Warn("Failed to unmarshal JSON object payload", "error", err, "payload", string(payload))
+				return
+			}
+			rawTicks = append(rawTicks, singleTick)
 		}
-		rawTicks = append(rawTicks, singleTick)
 	}
 
 	for _, tick := range rawTicks {
