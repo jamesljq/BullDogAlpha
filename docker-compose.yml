@@ -75,5 +75,6 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      - VITE_BFF_TARGET=http://bff:8080
     depends_on:
       - bff
