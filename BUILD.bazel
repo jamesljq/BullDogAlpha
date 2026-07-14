@@ -13,10 +13,27 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "start_docker_services",
+    srcs = ["start_docker_services.py"],
+    deps = [
+        requirement("absl-py"),
+    ],
+)
+
 py_test(
     name = "start_all_services_test",
     srcs = ["start_all_services_test.py"],
     data = ["start_all_services.py"],
+    deps = [
+        requirement("absl-py"),
+    ],
+)
+
+py_test(
+    name = "start_docker_services_test",
+    srcs = ["start_docker_services_test.py"],
+    data = ["start_docker_services.py"],
     deps = [
         requirement("absl-py"),
     ],
