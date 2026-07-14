@@ -149,8 +149,78 @@ export default function App() {
     }
   };
 
+  const getLogStyle = (line: string): React.CSSProperties => {
+    if (line.includes("WARN") || line.includes("WARNING")) {
+      return { color: '#ff9f0a', fontWeight: '500' };
+    }
+    if (line.includes("ERROR") || line.includes("failed") || line.includes("exited with code 1")) {
+      return { color: '#ff453a', fontWeight: '600' };
+    }
+    if (line.includes("successfully") || line.includes("SERVING") || line.includes("connected") || line.includes("active") || line.includes("Replay")) {
+      return { color: '#30d158' };
+    }
+    return { color: '#aeaeb2' };
+  };
+
   return (
     <div style={styles.container}>
+      <style>{`
+        .service-card {
+          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .service-card:hover {
+          transform: translateY(-2px);
+          background-color: rgba(255, 255, 255, 0.06) !important;
+          border-color: rgba(255, 255, 255, 0.15) !important;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        .apple-btn {
+          transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .apple-btn:hover {
+          filter: brightness(1.1) saturate(1.1);
+          transform: translateY(-1px);
+        }
+        .apple-btn:active {
+          transform: translateY(0) scale(0.98);
+        }
+        @keyframes pulse-green {
+          0% { box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.4); }
+          70% { box-shadow: 0 0 0 6px rgba(48, 209, 88, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(48, 209, 88, 0); }
+        }
+        @keyframes pulse-red {
+          0% { box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.4); }
+          70% { box-shadow: 0 0 0 6px rgba(255, 69, 58, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(255, 69, 58, 0); }
+        }
+        @keyframes pulse-orange {
+          0% { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0.4); }
+          70% { box-shadow: 0 0 0 6px rgba(255, 159, 10, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0); }
+        }
+        .pulse-dot-green {
+          animation: pulse-green 2s infinite;
+        }
+        .pulse-dot-red {
+          animation: pulse-red 2s infinite;
+        }
+        .pulse-dot-orange {
+          animation: pulse-orange 2s infinite;
+        }
+        .console-log {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+        }
+        .console-log::-webkit-scrollbar {
+          width: 6px;
+        }
+        .console-log::-webkit-scrollbar-thumb {
+          background-color: rgba(255, 255, 255, 0.08);
+          border-radius: 3px;
+        }
+      `}</style>
+
       {/* Header */}
       <header style={styles.header}>
         <div style={styles.logoContainer}>
@@ -159,10 +229,11 @@ export default function App() {
         </div>
         <div style={styles.headerStatus}>
           <span style={styles.statusLabel}>Global Circuit:</span>
-          <span style={{
+          <span className="pulse-dot-green" style={{
             ...styles.statusBadge,
-            backgroundColor: circuitState === "RUNNING" ? "#06b6d4" : circuitState === "PAUSED" ? "#f97316" : "#ef4444",
-            boxShadow: `0 0 10px ${circuitState === "RUNNING" ? "#06b6d4" : circuitState === "PAUSED" ? "#f97316" : "#ef4444"}`
+            backgroundColor: circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.15)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.15)" : "rgba(255, 69, 58, 0.15)",
+            border: `1px solid ${circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.3)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.3)" : "rgba(255, 69, 58, 0.3)"}`,
+            color: circuitState === "RUNNING" ? "#30d158" : circuitState === "PAUSED" ? "#ff9f0a" : "#ff453a",
           }}>
             {circuitState}
           </span>
@@ -182,33 +253,38 @@ export default function App() {
                 const isServing = svc.status === "SERVING";
                 
                 let statusLabel = svc.status;
-                let dotColor = isServing ? "#10b981" : "#ef4444";
+                let dotColor = isServing ? "#30d158" : "#ff453a";
+                let pulseClass = isServing ? "pulse-dot-green" : "pulse-dot-red";
                 let latencyLabel = `${svc.latency_ms} ms`;
                 
                 if (isEngine) {
                   if (isServing) {
                     statusLabel = "ACTIVE (STRATEGY)";
-                    dotColor = "#10b981";
+                    dotColor = "#30d158";
+                    pulseClass = "pulse-dot-green";
                   } else {
                     statusLabel = "INACTIVE (STRATEGY)";
-                    dotColor = "#64748b"; // Neutral slate-gray
+                    dotColor = "#8e8e93"; // Neutral slate-gray
+                    pulseClass = "";
                     latencyLabel = "offline";
                   }
                 }
                 
                 return (
-                  <div key={name} style={styles.serviceItem}>
+                  <div key={name} className="service-card" style={styles.serviceItem}>
                     <div style={styles.serviceMeta}>
                       <span style={styles.serviceName}>{name.toUpperCase()}</span>
                       <span style={styles.serviceLatency}>{latencyLabel}</span>
                     </div>
                     <div style={styles.statusRow}>
-                      <div style={{
+                      <div className={pulseClass} style={{
                         ...styles.statusDot,
                         backgroundColor: dotColor,
-                        boxShadow: `0 0 8px ${dotColor}`
                       }} />
-                      <span style={styles.statusText}>{statusLabel}</span>
+                      <span style={{
+                        ...styles.statusText,
+                        color: isEngine && !isServing ? "#8e8e93" : isServing ? "#30d158" : "#ff453a"
+                      }}>{statusLabel}</span>
                     </div>
                   </div>
                 );
@@ -227,36 +303,43 @@ export default function App() {
             <h2 style={styles.cardTitle}>Global Circuit Breaker Command Panel</h2>
             <div style={styles.buttonCluster}>
               <button 
+                className="apple-btn"
                 onClick={() => sendOOBAction("pause", "Manual admin pause")}
                 style={{
                   ...styles.btn,
-                  background: "linear-gradient(135deg, #f97316, #ea580c)",
-                  color: "#fff"
+                  backgroundColor: "rgba(255, 159, 10, 0.15)",
+                  border: "1px solid rgba(255, 159, 10, 0.3)",
+                  color: "#ff9f0a"
                 }}
               >
                 ⏸ PAUSE TRADING
               </button>
               
               <button 
+                className="apple-btn"
                 onClick={() => sendOOBAction("panic", "Emergency panic button")}
                 style={{
                   ...styles.btn,
                   ...styles.panicBtn,
-                  background: "linear-gradient(135deg, #ef4444, #dc2626)",
-                  boxShadow: "0 0 15px rgba(239, 68, 68, 0.6)"
+                  backgroundColor: "#ff3b30",
+                  color: "#fff",
+                  boxShadow: "0 4px 16px rgba(255, 59, 48, 0.3)"
                 }}
               >
                 🚨 PANIC LIQUIDATE
               </button>
 
               <button 
+                className="apple-btn"
                 onClick={requestResume}
                 disabled={circuitState === "RUNNING"}
                 style={{
                   ...styles.btn,
-                  backgroundColor: circuitState === "RUNNING" ? "#1e293b" : "#10b981",
-                  color: circuitState === "RUNNING" ? "#64748b" : "#fff",
-                  cursor: circuitState === "RUNNING" ? "not-allowed" : "pointer"
+                  backgroundColor: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.03)" : "#30d158",
+                  color: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.2)" : "#fff",
+                  border: circuitState === "RUNNING" ? "1px solid rgba(255, 255, 255, 0.05)" : "none",
+                  cursor: circuitState === "RUNNING" ? "not-allowed" : "pointer",
+                  boxShadow: circuitState === "RUNNING" ? "none" : "0 4px 16px rgba(48, 209, 88, 0.3)"
                 }}
               >
                 ⚡ SAFE RESUME WIZARD
@@ -319,13 +402,16 @@ export default function App() {
             <div style={styles.toggleRow}>
               <span>Reinforcement Learning Strategy (RL)</span>
               <button 
+                className="apple-btn"
                 onClick={() => {
                   setRlStrategyActive(!rlStrategyActive);
                   addLog(`RL Strategy toggled ${!rlStrategyActive ? "ON" : "OFF"}`);
                 }}
                 style={{
                   ...styles.toggleBtn,
-                  backgroundColor: rlStrategyActive ? "#06b6d4" : "#334155"
+                  backgroundColor: rlStrategyActive ? "#30d158" : "rgba(255, 255, 255, 0.08)",
+                  border: rlStrategyActive ? "none" : "1px solid rgba(255, 255, 255, 0.08)",
+                  color: rlStrategyActive ? "#fff" : "#8e8e93"
                 }}
               >
                 {rlStrategyActive ? "ACTIVE" : "INACTIVE"}
@@ -335,13 +421,16 @@ export default function App() {
             <div style={styles.toggleRow}>
               <span>Trend Following Strategy</span>
               <button 
+                className="apple-btn"
                 onClick={() => {
                   setTrendStrategyActive(!trendStrategyActive);
                   addLog(`Trend Strategy toggled ${!trendStrategyActive ? "ON" : "OFF"}`);
                 }}
                 style={{
                   ...styles.toggleBtn,
-                  backgroundColor: trendStrategyActive ? "#06b6d4" : "#334155"
+                  backgroundColor: trendStrategyActive ? "#30d158" : "rgba(255, 255, 255, 0.08)",
+                  border: trendStrategyActive ? "none" : "1px solid rgba(255, 255, 255, 0.08)",
+                  color: trendStrategyActive ? "#fff" : "#8e8e93"
                 }}
               >
                 {trendStrategyActive ? "ACTIVE" : "INACTIVE"}
@@ -350,9 +439,10 @@ export default function App() {
           </div>
 
           {devMode && (
-            <div style={{ ...styles.card, marginTop: '24px', borderColor: '#ef4444' }}>
-              <h2 style={{ ...styles.cardTitle, color: '#ef4444' }}>Developer Modes & Control</h2>
+            <div style={{ ...styles.card, marginTop: '24px', borderColor: 'rgba(255, 69, 58, 0.3)' }}>
+              <h2 style={{ ...styles.cardTitle, color: '#ff453a', borderBottomColor: 'rgba(255, 69, 58, 0.1)' }}>Developer Modes & Control</h2>
               <button 
+                className="apple-btn"
                 onClick={async () => {
                   addLog("Triggering physical platform shutdown API...");
                   try {
@@ -368,10 +458,10 @@ export default function App() {
                 }}
                 style={{
                   ...styles.btn,
-                  background: "linear-gradient(135deg, #7f1d1d, #b91c1c)",
-                  color: "#fff",
+                  backgroundColor: "rgba(255, 69, 58, 0.1)",
+                  border: "1px solid rgba(255, 69, 58, 0.3)",
+                  color: "#ff453a",
                   width: '100%',
-                  boxShadow: "0 0 10px rgba(239, 68, 68, 0.4)"
                 }}
               >
                 🛑 SHUTDOWN ALL SERVICES
@@ -387,9 +477,9 @@ export default function App() {
           <span style={styles.terminalTitle}>System Event Terminal Output Log</span>
           {isReconnecting && <span style={styles.reconnectBadge}>Connecting...</span>}
         </div>
-        <div style={styles.terminalConsole}>
+        <div className="console-log" style={styles.terminalConsole}>
           {logs.map((log, idx) => (
-            <div key={idx} style={styles.logLine}>{log}</div>
+            <div key={idx} style={{ ...styles.logLine, ...getLogStyle(log) }}>{log}</div>
           ))}
           <div ref={terminalEndRef} />
         </div>
@@ -398,25 +488,25 @@ export default function App() {
   );
 }
 
-// Inline CSS for Sleek Dark Glassmorphism Aesthetics
+// Inline CSS for Sleek Dark Glassmorphism Aesthetics (Apple Style)
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    backgroundColor: '#0b0f19',
-    color: '#f8fafc',
-    fontFamily: 'Inter, -apple-system, sans-serif',
+    backgroundColor: '#000000', // Apple pure black background
+    color: '#f5f5f7', // Apple warm gray text
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     minHeight: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    padding: '24px',
+    padding: '40px 32px 32px 32px',
     boxSizing: 'border-box',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottom: '1px solid #1e293b',
-    paddingBottom: '16px',
-    marginBottom: '24px',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+    paddingBottom: '20px',
+    marginBottom: '32px',
   },
   logoContainer: {
     display: 'flex',
@@ -424,19 +514,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '8px',
   },
   logoText: {
-    fontSize: '24px',
-    fontWeight: 'bold',
-    letterSpacing: '2px',
-    background: 'linear-gradient(to right, #22d3ee, #06b6d4)',
+    fontSize: '26px',
+    fontWeight: 700,
+    letterSpacing: '-0.5px',
+    background: 'linear-gradient(135deg, #ffffff 0%, #a1a1a6 100%)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
   logoSubtext: {
-    fontSize: '12px',
-    backgroundColor: '#334155',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    fontWeight: 'bold',
+    fontSize: '11px',
+    color: '#8e8e93',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    padding: '3px 8px',
+    borderRadius: '12px',
+    fontWeight: 600,
+    letterSpacing: '0.5px',
   },
   headerStatus: {
     display: 'flex',
@@ -444,47 +536,52 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '12px',
   },
   statusLabel: {
-    color: '#94a3b8',
+    color: '#8e8e93',
     fontSize: '14px',
+    fontWeight: 500,
   },
   statusBadge: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    fontWeight: 'bold',
+    padding: '6px 14px',
+    borderRadius: '16px',
+    fontWeight: 600,
     fontSize: '12px',
-    letterSpacing: '1px',
-    transition: 'all 0.3s ease',
+    letterSpacing: '0.5px',
+    transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
   },
   mainGrid: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
-    gap: '24px',
+    gap: '32px',
     flexGrow: 1,
-    marginBottom: '24px',
+    marginBottom: '32px',
   },
   leftCol: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '24px',
+    gap: '32px',
   },
   rightCol: {
     display: 'flex',
     flexDirection: 'column',
+    gap: '32px',
   },
   card: {
-    backgroundColor: 'rgba(30, 41, 59, 0.4)',
-    border: '1px solid rgba(255, 255, 255, 0.05)',
-    borderRadius: '12px',
-    padding: '20px',
-    backdropFilter: 'blur(10px)',
+    backgroundColor: 'rgba(28, 28, 30, 0.65)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderRadius: '18px',
+    padding: '24px',
+    backdropFilter: 'blur(30px) saturate(180%)',
+    boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
+    transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
   },
   cardTitle: {
-    fontSize: '18px',
-    fontWeight: 'bold',
-    marginBottom: '16px',
-    borderBottom: '1px solid rgba(255,255,255,0.05)',
-    paddingBottom: '10px',
-    color: '#cbd5e1',
+    fontSize: '17px',
+    fontWeight: 600,
+    marginBottom: '20px',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+    paddingBottom: '12px',
+    color: '#f5f5f7',
+    letterSpacing: '-0.2px',
   },
   matrixContainer: {
     display: 'grid',
@@ -492,24 +589,27 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '16px',
   },
   serviceItem: {
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    padding: '12px',
-    borderRadius: '8px',
-    border: '1px solid rgba(255, 255, 255, 0.02)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(255, 255, 255, 0.04)',
+    padding: '16px',
+    borderRadius: '14px',
+    cursor: 'default',
   },
   serviceMeta: {
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: '8px',
+    marginBottom: '10px',
   },
   serviceName: {
-    fontWeight: 'bold',
+    fontWeight: 600,
     fontSize: '13px',
-    color: '#94a3b8',
+    color: '#aeaeb2',
+    letterSpacing: '0.2px',
   },
   serviceLatency: {
     fontSize: '12px',
-    color: '#06b6d4',
+    color: '#8e8e93',
+    fontWeight: 500,
   },
   statusRow: {
     display: 'flex',
@@ -517,142 +617,148 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '8px',
   },
   statusDot: {
-    width: '10px',
-    height: '10px',
+    width: '8px',
+    height: '8px',
     borderRadius: '50%',
   },
   statusText: {
     fontSize: '12px',
-    fontWeight: '600',
+    fontWeight: 600,
   },
   degradeWarning: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
-    padding: '12px',
-    marginTop: '16px',
-    color: '#fca5a5',
+    backgroundColor: 'rgba(255, 159, 10, 0.15)',
+    border: '1px solid rgba(255, 159, 10, 0.3)',
+    borderRadius: '12px',
+    padding: '14px 16px',
+    marginTop: '20px',
+    color: '#ff9f0a',
     fontSize: '13px',
+    fontWeight: 500,
   },
   warningIcon: {
-    fontSize: '18px',
+    fontSize: '16px',
   },
   buttonCluster: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '14px',
   },
   btn: {
-    padding: '14px',
-    borderRadius: '8px',
+    padding: '16px',
+    borderRadius: '12px',
     border: 'none',
     fontSize: '14px',
-    fontWeight: 'bold',
+    fontWeight: 600,
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
   },
   panicBtn: {
-    fontSize: '16px',
-    letterSpacing: '1px',
-    animation: 'pulse 2s infinite',
+    fontSize: '14px',
+    letterSpacing: '0.5px',
   },
   sliderGroup: {
-    marginBottom: '20px',
+    marginBottom: '24px',
   },
   sliderLabelRow: {
     display: 'flex',
     justifyContent: 'space-between',
     fontSize: '14px',
-    color: '#94a3b8',
-    marginBottom: '8px',
+    color: '#8e8e93',
+    marginBottom: '10px',
+    fontWeight: 500,
   },
   sliderValue: {
-    color: '#f8fafc',
-    fontWeight: 'bold',
+    color: '#ffffff',
+    fontWeight: 600,
   },
   slider: {
     width: '100%',
-    accentColor: '#06b6d4',
-    backgroundColor: '#334155',
-    height: '6px',
-    borderRadius: '3px',
+    accentColor: '#0a84ff', // Apple blue color
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    height: '4px',
+    borderRadius: '2px',
     outline: 'none',
+    cursor: 'pointer',
   },
   divider: {
     border: 'none',
-    borderTop: '1px solid rgba(255,255,255,0.05)',
-    margin: '20px 0',
+    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+    margin: '24px 0',
   },
   subTitle: {
     fontSize: '15px',
-    fontWeight: 'bold',
-    marginBottom: '12px',
-    color: '#cbd5e1',
+    fontWeight: 600,
+    marginBottom: '16px',
+    color: '#f5f5f7',
   },
   toggleRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.4)',
-    padding: '12px',
-    borderRadius: '8px',
-    marginBottom: '10px',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    border: '1px solid rgba(255, 255, 255, 0.04)',
+    padding: '14px 18px',
+    borderRadius: '12px',
+    marginBottom: '12px',
     fontSize: '14px',
+    fontWeight: 500,
   },
   toggleBtn: {
-    padding: '6px 12px',
-    borderRadius: '4px',
+    padding: '6px 14px',
+    borderRadius: '16px',
     border: 'none',
     color: '#fff',
     fontSize: '11px',
-    fontWeight: 'bold',
+    fontWeight: 600,
+    letterSpacing: '0.5px',
     cursor: 'pointer',
   },
   terminal: {
-    backgroundColor: '#090d16',
-    border: '1px solid #1e293b',
-    borderRadius: '12px',
+    backgroundColor: 'rgba(28, 28, 30, 0.85)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderRadius: '18px',
     display: 'flex',
     flexDirection: 'column',
-    height: '220px',
+    height: '240px',
+    backdropFilter: 'blur(30px) saturate(180%)',
+    boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
   },
   terminalHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottom: '1px solid #1e293b',
-    padding: '10px 16px',
-    backgroundColor: '#0f172a',
-    borderTopLeftRadius: '12px',
-    borderTopRightRadius: '12px',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+    padding: '12px 20px',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderTopLeftRadius: '18px',
+    borderTopRightRadius: '18px',
   },
   terminalTitle: {
     fontSize: '12px',
-    fontWeight: '600',
-    color: '#94a3b8',
+    fontWeight: 600,
+    color: '#8e8e93',
+    letterSpacing: '0.2px',
   },
   reconnectBadge: {
     fontSize: '10px',
-    backgroundColor: '#ef4444',
-    padding: '2px 6px',
-    borderRadius: '4px',
+    backgroundColor: '#ff453a',
+    padding: '3px 8px',
+    borderRadius: '12px',
     color: '#fff',
-    fontWeight: 'bold',
-    animation: 'pulse 1s infinite',
+    fontWeight: 600,
   },
   terminalConsole: {
-    padding: '12px 16px',
+    padding: '16px 20px',
     flexGrow: 1,
     overflowY: 'auto',
-    fontFamily: 'SFMono-Regular, Consolas, Monaco, monospace',
+    fontFamily: 'SFMono-Regular, SF Pro Text, Consolas, Monaco, monospace',
     fontSize: '12px',
-    color: '#10b981',
     lineHeight: '1.6',
   },
   logLine: {
     wordBreak: 'break-all',
+    marginBottom: '2px',
   },
 };
