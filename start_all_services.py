@@ -297,16 +297,21 @@ class PlatformManager:
                 if exited_name:
                     if os.WIFEXITED(status):
                         exit_code = os.WEXITSTATUS(status)
+                        logging.info("SYSTEM: %s (PID: %d) exited normally with code %d.", exited_name, pid, exit_code)
                     elif os.WIFSIGNALED(status):
-                        exit_code = -os.WTERMSIG(status)
+                        signal_num = os.WTERMSIG(status)
+                        logging.warning("SYSTEM: %s (PID: %d) was terminated by signal %d.", exited_name, pid, signal_num)
+                        # Negative exit code matches standard Python subprocess.Popen.returncode behavior for signals
+                        exit_code = -signal_num
                     else:
                         exit_code = status
+                        logging.warning("SYSTEM: %s (PID: %d) terminated with unhandled status %d.", exited_name, pid, status)
 
                     if exited_name == "BFFGateway":
-                        logging.warning("SYSTEM: BFFGateway (PID: %d) has exited with code %d. Shutting down all other services cleanly...", pid, exit_code)
+                        logging.warning("SYSTEM: BFFGateway has exited. Shutting down all other services cleanly...")
                         self.clean_shutdown(None, None)
-                    logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly with code %d.", exited_name, pid, exit_code)
-                    logging.warning("SYSTEM: Check %s/%s.log for error details.", log_dir, exited_name.lower())
+                    
+                    logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly. Check %s/%s.log for error details.", exited_name, pid, log_dir, exited_name.lower())
                     del self.processes[exited_name]
             except ChildProcessError:
                 # No child processes left to wait for
