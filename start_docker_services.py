@@ -163,4 +163,19 @@ def main(argv):
     orchestrator.run()
 
 if __name__ == "__main__":
+    # If the user did not explicitly supply a flagfile or manual polygon parameters,
+    # and a local 'local.flags' configuration file exists, load it by default.
+    has_explicit_config = any(
+        arg.startswith("--flagfile") or 
+        arg.startswith("--polygon_url") or 
+        arg.startswith("--polygon_api_key") 
+        for arg in sys.argv
+    )
+    if not has_explicit_config:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        workspace_dir = os.environ.get("BUILD_WORKSPACE_DIRECTORY", script_dir)
+        local_flags_path = os.path.join(workspace_dir, "local.flags")
+        if os.path.exists(local_flags_path):
+            sys.argv.append(f"--flagfile={local_flags_path}")
+            
     app.run(main)
