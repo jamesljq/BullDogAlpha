@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import datetime
 import os
 import sys
 import time
@@ -93,25 +94,33 @@ for flag_name in ["redis_addr", "bff_addr", "mdg_addr", "risk_addr", "ems_addr",
         message=f"Flag --{flag_name} must be in '<host>:<port>' format with a port between 1 and 65535."
     )
 
+# Private constants for process lifecycle timings
+_PROCESS_TERMINATE_TIMEOUT = datetime.timedelta(seconds=3)
+_REDIS_STARTUP_TIMEOUT = datetime.timedelta(seconds=10)
+_SERVICE_STARTUP_TIMEOUT = datetime.timedelta(seconds=20)
+_POLL_INTERVAL = datetime.timedelta(seconds=0.1)
+_SOCKET_TIMEOUT = datetime.timedelta(seconds=0.5)
+
 processes = {}
 log_files = []
 
 def check_command_exists(cmd):
     return shutil.which(cmd) is not None
 
-def wait_for_service(host, port, name, timeout=15):
+def wait_for_service(host, port, name, timeout):
     logging.info("SYSTEM: Waiting for %s to become available on %s:%d...", name, host, port)
     start_time = time.time()
-    while time.time() - start_time < timeout:
+    timeout_seconds = timeout.total_seconds()
+    while time.time() - start_time < timeout_seconds:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.5)
+            s.settimeout(_SOCKET_TIMEOUT.total_seconds())
             s.connect((host, port))
             s.close()
             logging.info("SYSTEM: %s is now available.", name)
             return True
         except Exception:
-            time.sleep(0.1)
+            time.sleep(_POLL_INTERVAL.total_seconds())
     logging.error("SYSTEM: Timeout waiting for %s on %s:%d.", name, host, port)
     return False
 
@@ -124,7 +133,7 @@ def clean_shutdown(signum, frame):
             # Send SIGTERM first
             proc.terminate()
             try:
-                proc.wait(timeout=3)
+                proc.wait(timeout=_PROCESS_TERMINATE_TIMEOUT.total_seconds())
             except subprocess.TimeoutExpired:
                 # Force kill if hung
                 proc.kill()
@@ -166,7 +175,7 @@ def main(argv):
     redis_running = False
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.5)
+        s.settimeout(_SOCKET_TIMEOUT.total_seconds())
         s.connect((redis_host, redis_port))
         s.close()
         redis_running = True
@@ -183,7 +192,7 @@ def main(argv):
             processes["Redis"] = proc
             
             # Wait for Redis to start up deterministically
-            if not wait_for_service(redis_host, redis_port, "Redis", timeout=10):
+            if not wait_for_service(redis_host, redis_port, "Redis", timeout=_REDIS_STARTUP_TIMEOUT):
                 logging.error("REDIS: Failed to start Redis server.")
                 sys.exit(1)
         else:
@@ -221,7 +230,7 @@ def main(argv):
         processes[name] = proc
         
         # Wait for the service to start up deterministically by checking its port
-        if not wait_for_service("127.0.0.1", port_mapping[name], name, timeout=20):
+        if not wait_for_service("127.0.0.1", port_mapping[name], name, timeout=_SERVICE_STARTUP_TIMEOUT):
             logging.error("SYSTEM: Failed to verify that %s started successfully.", name)
             clean_shutdown(None, None)
 
@@ -258,7 +267,7 @@ def main(argv):
     processes["WebConsole"] = proc
 
     # Wait for React to start up deterministically
-    if not wait_for_service("127.0.0.1", web_port, "WebConsole", timeout=20):
+    if not wait_for_service("127.0.0.1", web_port, "WebConsole", timeout=_SERVICE_STARTUP_TIMEOUT):
         logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
         clean_shutdown(None, None)
 

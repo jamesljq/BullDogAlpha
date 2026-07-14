@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import datetime
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 
@@ -133,7 +134,7 @@ class TestStartAllServices(unittest.TestCase):
         mock_socket.return_value = mock_sock_inst
         mock_sock_inst.connect.return_value = None
         
-        self.assertTrue(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=1))
+        self.assertTrue(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=datetime.timedelta(seconds=1)))
         mock_sock_inst.connect.assert_called_once_with(("127.0.0.1", 8080))
 
     @patch('time.sleep')
@@ -143,7 +144,7 @@ class TestStartAllServices(unittest.TestCase):
         mock_socket.return_value = mock_sock_inst
         mock_sock_inst.connect.side_effect = Exception("conn failed")
         
-        self.assertFalse(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=0.2))
+        self.assertFalse(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=datetime.timedelta(seconds=0.2)))
         self.assertTrue(mock_sleep.called)
 
     def test_validate_addr(self):
