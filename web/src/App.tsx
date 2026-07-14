@@ -177,22 +177,42 @@ export default function App() {
           <div style={styles.card}>
             <h2 style={styles.cardTitle}>Microservices Health & Topology</h2>
             <div style={styles.matrixContainer}>
-              {Object.entries(services).map(([name, svc]) => (
-                <div key={name} style={styles.serviceItem}>
-                  <div style={styles.serviceMeta}>
-                    <span style={styles.serviceName}>{name.toUpperCase()}</span>
-                    <span style={styles.serviceLatency}>{svc.latency_ms} ms</span>
+              {Object.entries(services).map(([name, svc]) => {
+                const isEngine = name === "alpha_engine";
+                const isServing = svc.status === "SERVING";
+                
+                let statusLabel = svc.status;
+                let dotColor = isServing ? "#10b981" : "#ef4444";
+                let latencyLabel = `${svc.latency_ms} ms`;
+                
+                if (isEngine) {
+                  if (isServing) {
+                    statusLabel = "ACTIVE (STRATEGY)";
+                    dotColor = "#10b981";
+                  } else {
+                    statusLabel = "INACTIVE (STRATEGY)";
+                    dotColor = "#64748b"; // Neutral slate-gray
+                    latencyLabel = "offline";
+                  }
+                }
+                
+                return (
+                  <div key={name} style={styles.serviceItem}>
+                    <div style={styles.serviceMeta}>
+                      <span style={styles.serviceName}>{name.toUpperCase()}</span>
+                      <span style={styles.serviceLatency}>{latencyLabel}</span>
+                    </div>
+                    <div style={styles.statusRow}>
+                      <div style={{
+                        ...styles.statusDot,
+                        backgroundColor: dotColor,
+                        boxShadow: `0 0 8px ${dotColor}`
+                      }} />
+                      <span style={styles.statusText}>{statusLabel}</span>
+                    </div>
                   </div>
-                  <div style={styles.statusRow}>
-                    <div style={{
-                      ...styles.statusDot,
-                      backgroundColor: svc.status === "SERVING" ? "#10b981" : "#ef4444",
-                      boxShadow: `0 0 8px ${svc.status === "SERVING" ? "#10b981" : "#ef4444"}`
-                    }} />
-                    <span style={styles.statusText}>{svc.status}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             {systemState === "DEGRADED" && (
               <div style={styles.degradeWarning}>
