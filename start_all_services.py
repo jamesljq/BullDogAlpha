@@ -270,19 +270,31 @@ def main(argv):
     logging.info("To stop all services cleanly, press Ctrl+C")
     logging.info("="*60)
 
-    # Monitor subprocesses
-    while True:
-        for name, proc in list(processes.items()):
-            ret = proc.poll()
-            if ret is not None:
-                if name == "BFFGateway":
-                    logging.warning("SYSTEM: BFFGateway has exited. Shutting down all other services cleanly...")
+    # Monitor subprocesses using os.wait() (kernel-level event blocking)
+    while processes:
+        try:
+            pid, status = os.wait()
+            # Find which process exited
+            exited_name = None
+            for name, proc in list(processes.items()):
+                if proc.pid == pid:
+                    exited_name = name
+                    break
+            
+            if exited_name:
+                exit_code = (status >> 8) if (status & 0xff) == 0 else -(status & 0x7f)
+                if exited_name == "BFFGateway":
+                    logging.warning("SYSTEM: BFFGateway (PID: %d) has exited with code %d. Shutting down all other services cleanly...", pid, exit_code)
                     clean_shutdown(None, None)
-                logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly with code %d.", name, proc.pid, ret)
-                # Keep checking log outputs
-                logging.warning("SYSTEM: Check %s/%s.log for error details.", log_dir, name.lower())
-                del processes[name]
-        time.sleep(2)
+                logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly with code %d.", exited_name, pid, exit_code)
+                logging.warning("SYSTEM: Check %s/%s.log for error details.", log_dir, exited_name.lower())
+                del processes[exited_name]
+        except ChildProcessError:
+            # No child processes left to wait for
+            break
+        except InterruptedError:
+            # Interrupted by signal handler (Ctrl+C)
+            continue
 
 if __name__ == "__main__":
     app.run(main)

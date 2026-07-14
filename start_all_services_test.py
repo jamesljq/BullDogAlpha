@@ -55,7 +55,7 @@ class TestStartAllServices(unittest.TestCase):
         with patch('os.path.exists', return_value=True):
             # Run main, trigger SystemExit after launching all processes
             with patch('start_all_services.wait_for_service', return_value=True):
-                with patch('time.sleep', side_effect=mock_sleep):
+                with patch('os.wait', side_effect=SystemExit()):
                     with self.assertRaises(SystemExit):
                         start_all_services.main(['start_all_services.py'])
         
@@ -121,8 +121,9 @@ class TestStartAllServices(unittest.TestCase):
         
         with patch('os.path.exists', return_value=True):
             with patch('start_all_services.wait_for_service', return_value=True):
-                with self.assertRaises(SystemExit):
-                    start_all_services.main(['start_all_services.py'])
+                with patch('os.wait', return_value=(9999, 0)):
+                    with self.assertRaises(SystemExit):
+                        start_all_services.main(['start_all_services.py'])
                 
         mock_clean_shutdown.assert_called_once()
 
