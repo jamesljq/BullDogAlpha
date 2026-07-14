@@ -101,6 +101,10 @@ _SERVICE_STARTUP_TIMEOUT = datetime.timedelta(seconds=20)
 _POLL_INTERVAL = datetime.timedelta(seconds=0.1)
 _SOCKET_TIMEOUT = datetime.timedelta(seconds=0.5)
 
+# Exit status codes
+_EXIT_SUCCESS = 0
+_EXIT_FAILURE = 1
+
 def check_command_exists(cmd):
     return shutil.which(cmd) is not None
 
@@ -157,7 +161,7 @@ class PlatformManager:
                 pass
                 
         logging.info("SYSTEM: All components shut down. Goodbye!")
-        sys.exit(0)
+        sys.exit(_EXIT_SUCCESS)
 
     def run(self):
         workspace_dir = FLAGS.workspace_dir if FLAGS.workspace_dir else os.path.dirname(os.path.abspath(__file__))
@@ -194,13 +198,12 @@ class PlatformManager:
                 proc = subprocess.Popen(["redis-server", "--port", str(redis_port)], stdout=redis_log, stderr=redis_log)
                 self.processes["Redis"] = proc
                 
-                # Wait for Redis to start up deterministically
                 if not wait_for_service(redis_host, redis_port, "Redis", timeout=_REDIS_STARTUP_TIMEOUT):
                     logging.error("REDIS: Failed to start Redis server.")
-                    sys.exit(1)
+                    sys.exit(_EXIT_FAILURE)
             else:
                 logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %s:%d first.", redis_host, redis_port)
-                sys.exit(1)
+                sys.exit(_EXIT_FAILURE)
 
         # 3. Start Backend Services via Bazel
         bff_host, bff_port_str = FLAGS.bff_addr.rsplit(":", 1)
@@ -274,13 +277,11 @@ class PlatformManager:
             logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
             self.clean_shutdown(None, None)
 
-        logging.info("="*60)
         logging.info("Bulldog Alpha Platform Started Successfully!")
         logging.info("Monitoring Dashboard: http://localhost:%d", web_port)
         logging.info("BFF REST / WS API Gateway: http://localhost:%d", bff_port)
         logging.info("Log directory: %s", log_dir)
         logging.info("To stop all services cleanly, press Ctrl+C")
-        logging.info("="*60)
 
         # Monitor subprocesses using os.wait() (kernel-level event blocking)
         while self.processes:

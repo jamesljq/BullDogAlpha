@@ -84,7 +84,7 @@ class TestStartAllServices(unittest.TestCase):
         
         mock_proc.terminate.assert_called_once()
         mock_file.close.assert_called_once()
-        mock_exit.assert_called_once_with(0)
+        mock_exit.assert_called_once_with(start_all_services._EXIT_SUCCESS)
 
     @patch('start_all_services.PlatformManager.clean_shutdown')
     @patch('subprocess.Popen')
