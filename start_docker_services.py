@@ -6,6 +6,8 @@ import subprocess
 import signal
 import shutil
 import platform
+import threading
+import time
 from absl import app
 from absl import flags
 from absl import logging
@@ -104,7 +106,32 @@ class DockerOrchestrator:
 
         # 4. Launch Docker Compose up
         logging.info("SYSTEM: Launching Docker Compose cluster...")
-        compose_cmd = ["docker", "compose", "up", "--build", "--abort-on-container-exit"]
+        compose_cmd = ["docker", "compose", "up", "--build"]
+
+        stop_monitor = threading.Event()
+
+        def monitor_bff_shutdown():
+            while not stop_monitor.is_set():
+                time.sleep(2)
+                try:
+                    res = subprocess.run(
+                        ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", "bulldog_bff"],
+                        capture_output=True,
+                        text=True
+                    )
+                    if res.returncode == 0:
+                        parts = res.stdout.strip().split()
+                        if len(parts) == 2:
+                            status, exit_code = parts
+                            if status == "exited" and exit_code == "0":
+                                logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
+                                subprocess.run(["docker", "compose", "down"], capture_output=True)
+                                os._exit(_EXIT_SUCCESS)
+                except Exception:
+                    pass
+
+        monitor_thread = threading.Thread(target=monitor_bff_shutdown, daemon=True)
+        monitor_thread.start()
         
         try:
             # This will block until the user exits or containers exit.
@@ -113,6 +140,8 @@ class DockerOrchestrator:
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Docker Compose exited with error: %s", e)
             sys.exit(_EXIT_FAILURE)
+        finally:
+            stop_monitor.set()
 
 def main(argv):
     del argv  # Unused
