@@ -32,6 +32,8 @@ class TestWebAssets(unittest.TestCase):
         self.assertIn("WebSocket", content)
         self.assertIn("api/circuit", content)
         self.assertIn("api/config", content)
+        self.assertIn("api/shutdown", content)
+        self.assertIn("SHUTDOWN ALL SERVICES", content)
 
     def test_react_tests(self):
         test_path = os.path.join(self.web_dir, "src", "App.test.tsx")

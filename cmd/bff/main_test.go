@@ -604,4 +604,60 @@ func TestBFFRunApp(t *testing.T) {
 	}
 }
 
+func TestBFFShutdownAPI(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	bff := NewBFFServer(rdb, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+
+	// 1. DevMode false, should return Forbidden
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/shutdown", nil)
+	bff.HandleShutdownAPI(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", rec.Code)
+	}
+
+	// 2. DevMode true, Method GET, should return Method Not Allowed
+	bff.devMode = true
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/shutdown", nil)
+	bff.HandleShutdownAPI(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+
+	// 3. DevMode true, Method POST, should succeed and call osExit
+	var exitCalled bool
+	var exitCode int
+	oldExit := osExit
+	osExit = func(code int) {
+		exitCalled = true
+		exitCode = code
+	}
+	defer func() { osExit = oldExit }()
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/shutdown", nil)
+	bff.HandleShutdownAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	// Wait a moment for the exit goroutine to execute
+	time.Sleep(300 * time.Millisecond)
+	if !exitCalled {
+		t.Error("expected osExit to be called")
+	}
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+}
+
 

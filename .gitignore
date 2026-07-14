@@ -115,5 +115,5 @@ htmlcov/
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-
+# Docker build staging
+/bin/
