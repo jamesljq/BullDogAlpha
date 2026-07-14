@@ -26,6 +26,16 @@ flags.DEFINE_boolean(
     True,
     "Toggles the developer mode on the BFF Gateway inside Docker Compose."
 )
+flags.DEFINE_string(
+    "polygon_url",
+    "ws://bff:8080/polygon",
+    "The WebSocket URL to connect for Polygon.io market data feed."
+)
+flags.DEFINE_string(
+    "polygon_api_key",
+    "",
+    "The API Key to authenticate with Polygon.io. Leave empty if using Mock Feed."
+)
 
 _EXIT_SUCCESS = 0
 _EXIT_FAILURE = 1
@@ -133,10 +143,14 @@ class DockerOrchestrator:
         monitor_thread = threading.Thread(target=monitor_bff_shutdown, daemon=True)
         monitor_thread.start()
         
+        env = os.environ.copy()
+        env["POLYGON_URL"] = FLAGS.polygon_url
+        env["POLYGON_API_KEY"] = FLAGS.polygon_api_key
+
         try:
             # This will block until the user exits or containers exit.
             # When Ctrl+C is pressed, the signal handler handle_shutdown will trigger.
-            subprocess.run(compose_cmd, check=True)
+            subprocess.run(compose_cmd, check=True, env=env)
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Docker Compose exited with error: %s", e)
             sys.exit(_EXIT_FAILURE)

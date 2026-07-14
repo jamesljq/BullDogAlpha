@@ -1,0 +1,23 @@
+# ==============================================================================
+# Bulldog Alpha - ABSL Flags Configuration File
+# ==============================================================================
+# Copy this file to 'local.flags' and modify settings for local execution:
+#   cp local.flags.example local.flags
+#
+# Pass this flagfile when running the orchestrator via Bazel:
+#   bazel run :start_docker_services -- --flagfile=local.flags
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Markets Data Gateway (MDG) Configuration
+# ------------------------------------------------------------------------------
+# Mock Feed (Default): ws://bff:8080/polygon
+# Real Polygon.io Delayed Stocks Feed: wss://delayed.polygon.io/stocks
+# Real Polygon.io Live Stocks Feed: wss://socket.polygon.io/stocks
+--polygon_url=ws://bff:8080/polygon
+
+# ------------------------------------------------------------------------------
+# 2. Authentication Keys
+# ------------------------------------------------------------------------------
+# Your personal Polygon.io API Key (leave empty if using Mock Feed)
+--polygon_api_key=
