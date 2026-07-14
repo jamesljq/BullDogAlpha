@@ -162,7 +162,11 @@ class PlatformManager:
         sys.exit(_EXIT_SUCCESS)
 
     def run(self):
-        workspace_dir = FLAGS.workspace_dir if FLAGS.workspace_dir else os.path.dirname(os.path.abspath(__file__))
+        workspace_dir = FLAGS.workspace_dir
+        if not workspace_dir:
+            workspace_dir = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
+        if not workspace_dir:
+            workspace_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(workspace_dir)
 
         # 1. Create logs directory

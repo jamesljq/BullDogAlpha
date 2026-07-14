@@ -1,9 +1,17 @@
 load("@gazelle//:def.bzl", "gazelle")
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("@pip//:requirements.bzl", "requirement")
 
 # gazelle:prefix bulldog_alpha
 gazelle(name = "gazelle")
+
+py_binary(
+    name = "start_all_services",
+    srcs = ["start_all_services.py"],
+    deps = [
+        requirement("absl-py"),
+    ],
+)
 
 py_test(
     name = "start_all_services_test",
