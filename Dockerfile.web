@@ -1,0 +1,15 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy dependencies first for Docker caching
+COPY web/package.json ./
+
+RUN npm install
+
+# Copy source tree and config files
+COPY web/ ./
+
+EXPOSE 3000
+
+CMD ["npm", "start"]

@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: bulldog_redis
+    ports:
+      - "6379:6379"
+
+  ems:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_NAME: ems
+    container_name: bulldog_ems
+    ports:
+      - "50052:50052"
+    depends_on:
+      - redis
+
+  risk_node:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_NAME: risk_node
+    container_name: bulldog_risk_node
+    ports:
+      - "50051:50051"
+    depends_on:
+      - redis
+
+  mdg:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_NAME: mdg
+    container_name: bulldog_mdg
+    ports:
+      - "50053:50053"
+    depends_on:
+      - redis
+
+  bff:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_NAME: bff
+    container_name: bulldog_bff
+    command: [
+      "--port=8080",
+      "--redis-addr=redis:6379",
+      "--mdg-addr=mdg:50053",
+      "--risk-addr=risk_node:50051",
+      "--ems-addr=ems:50052",
+      "--dev-mode"
+    ]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+      - ems
+      - risk_node
+      - mdg
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: bulldog_web
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    depends_on:
+      - bff
