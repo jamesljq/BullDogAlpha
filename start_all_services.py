@@ -11,16 +11,87 @@ from absl import flags
 from absl import logging
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("redis_host", "127.0.0.1", "Redis server host.")
-flags.DEFINE_integer("redis_port", 6379, "Redis server port.")
-flags.DEFINE_string("workspace_dir", "", "Path to the platform workspace directory. If empty, uses the script directory.")
-flags.DEFINE_boolean("dev_mode", True, "Enable developer mode controls on BFF Gateway.")
-flags.DEFINE_integer("bff_port", 8080, "BFF Gateway port.")
-flags.DEFINE_string("mdg_addr", "localhost:50053", "MDG gRPC address.")
-flags.DEFINE_string("risk_addr", "localhost:50051", "Risk Node gRPC address.")
-flags.DEFINE_string("ems_addr", "localhost:50052", "EMS gRPC address.")
-flags.DEFINE_string("engine_addr", "localhost:50054", "Alpha Engine mock gRPC address.")
-flags.DEFINE_integer("web_port", 3000, "Web Console port.")
+
+flags.DEFINE_string(
+    "redis_addr",
+    "127.0.0.1:6379",
+    "The address format '<host>:<port>' where the Redis server is listening or "
+    "will be started. Used by the BFF Gateway and other backend services for "
+    "circuit breaking and state sharing."
+)
+flags.DEFINE_string(
+    "workspace_dir",
+    "",
+    "The absolute or relative path to the platform workspace directory (monorepo root). "
+    "If not specified, defaults to the directory containing this script. All Bazel "
+    "and npm commands will be executed with this directory as the working directory."
+)
+flags.DEFINE_boolean(
+    "dev_mode",
+    True,
+    "Toggles the developer mode controls on the BFF Gateway. If enabled, the BFF "
+    "Gateway exposes the admin /api/shutdown endpoint, which allows the React Web "
+    "Console to shut down the entire backend service topology locally."
+)
+flags.DEFINE_string(
+    "bff_addr",
+    "127.0.0.1:8080",
+    "The address format '<host>:<port>' on which the BFF (Backend-For-Frontend) HTTP "
+    "and WebSocket gateway server will listen. Exposed to the Web Console."
+)
+flags.DEFINE_string(
+    "mdg_addr",
+    "127.0.0.1:50053",
+    "The gRPC address format '<host>:<port>' of the Market Data Generator (MDG) service. "
+    "The script probes this address to verify service availability before continuing."
+)
+flags.DEFINE_string(
+    "risk_addr",
+    "127.0.0.1:50051",
+    "The gRPC address format '<host>:<port>' of the Risk Node service. The script "
+    "probes this address to verify service availability before continuing."
+)
+flags.DEFINE_string(
+    "ems_addr",
+    "127.0.0.1:50052",
+    "The gRPC address format '<host>:<port>' of the Execution Management System (EMS) service. "
+    "The script probes this address to verify service availability before continuing."
+)
+flags.DEFINE_string(
+    "engine_addr",
+    "127.0.0.1:50054",
+    "The gRPC address format '<host>:<port>' of the Alpha Engine mock service. Probed "
+    "for verification."
+)
+flags.DEFINE_string(
+    "web_addr",
+    "127.0.0.1:3000",
+    "The address format '<host>:<port>' where the React-based Web Console frontend "
+    "server will listen. This port will be mapped to the Node.js PORT environment variable."
+)
+
+def validate_addr(addr):
+    if ":" not in addr:
+        return False
+    parts = addr.rsplit(":", 1)
+    if len(parts) != 2:
+        return False
+    host, port_str = parts
+    if not host:
+        return False
+    try:
+        port = int(port_str)
+        return 1 <= port <= 65535
+    except ValueError:
+        return False
+
+# Register validators for all address flags
+for flag_name in ["redis_addr", "bff_addr", "mdg_addr", "risk_addr", "ems_addr", "engine_addr", "web_addr"]:
+    flags.register_validator(
+        flag_name,
+        validate_addr,
+        message=f"Flag --{flag_name} must be in '<host>:<port>' format with a port between 1 and 65535."
+    )
 
 processes = {}
 log_files = []
@@ -88,50 +159,56 @@ def main(argv):
     # 2. Check and start Redis
     logging.info("REDIS: Verifying Redis server availability...")
     
+    redis_host, redis_port_str = FLAGS.redis_addr.rsplit(":", 1)
+    redis_port = int(redis_port_str)
+
     # Check if redis is already listening
     redis_running = False
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(0.5)
-        s.connect((FLAGS.redis_host, FLAGS.redis_port))
+        s.connect((redis_host, redis_port))
         s.close()
         redis_running = True
-        logging.info("REDIS: Redis server is already running on port %d.", FLAGS.redis_port)
+        logging.info("REDIS: Redis server is already running on %s:%d.", redis_host, redis_port)
     except:
         pass
 
     if not redis_running:
         if check_command_exists("redis-server"):
-            logging.warning("REDIS: Redis is not running. Launching redis-server on port %d...", FLAGS.redis_port)
+            logging.warning("REDIS: Redis is not running. Launching redis-server on %s:%d...", redis_host, redis_port)
             redis_log = open(os.path.join(log_dir, "redis.log"), "w")
             log_files.append(redis_log)
-            proc = subprocess.Popen(["redis-server", "--port", str(FLAGS.redis_port)], stdout=redis_log, stderr=redis_log)
+            proc = subprocess.Popen(["redis-server", "--port", str(redis_port)], stdout=redis_log, stderr=redis_log)
             processes["Redis"] = proc
             
             # Wait for Redis to start up deterministically
-            if not wait_for_service(FLAGS.redis_host, FLAGS.redis_port, "Redis", timeout=10):
+            if not wait_for_service(redis_host, redis_port, "Redis", timeout=10):
                 logging.error("REDIS: Failed to start Redis server.")
                 sys.exit(1)
         else:
-            logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %d first.", FLAGS.redis_port)
+            logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %s:%d first.", redis_host, redis_port)
             sys.exit(1)
 
     # 3. Start Backend Services via Bazel
+    bff_host, bff_port_str = FLAGS.bff_addr.rsplit(":", 1)
+    bff_port = int(bff_port_str)
+
     components = {
         "EMS": ["bazel", "run", "//cmd/ems"],
         "RiskNode": ["bazel", "run", "//cmd/risk_node"],
         "MDG": ["bazel", "run", "//cmd/mdg"],
-        "BFFGateway": ["bazel", "run", "//cmd/bff", "--", f"--port={FLAGS.bff_port}", f"--redis-addr={FLAGS.redis_host}:{FLAGS.redis_port}"]
+        "BFFGateway": ["bazel", "run", "//cmd/bff", "--", f"--port={bff_port}", f"--redis-addr={FLAGS.redis_addr}"]
     }
 
     if FLAGS.dev_mode:
         components["BFFGateway"].append("--dev-mode")
 
     port_mapping = {
-        "EMS": 50052,
-        "RiskNode": 50051,
-        "MDG": 50053,
-        "BFFGateway": FLAGS.bff_port
+        "EMS": int(FLAGS.ems_addr.rsplit(":", 1)[1]),
+        "RiskNode": int(FLAGS.risk_addr.rsplit(":", 1)[1]),
+        "MDG": int(FLAGS.mdg_addr.rsplit(":", 1)[1]),
+        "BFFGateway": bff_port
     }
 
     for name, cmd in components.items():
@@ -170,22 +247,25 @@ def main(argv):
     web_log = open(os.path.join(log_dir, "web.log"), "w")
     log_files.append(web_log)
     
+    web_host, web_port_str = FLAGS.web_addr.rsplit(":", 1)
+    web_port = int(web_port_str)
+
     # Configure PORT env variable for npm start
     env = os.environ.copy()
-    env["PORT"] = str(FLAGS.web_port)
+    env["PORT"] = str(web_port)
     
     proc = subprocess.Popen(["npm", "start"], stdout=web_log, stderr=web_log, cwd=web_dir, env=env)
     processes["WebConsole"] = proc
 
     # Wait for React to start up deterministically
-    if not wait_for_service("127.0.0.1", FLAGS.web_port, "WebConsole", timeout=20):
+    if not wait_for_service("127.0.0.1", web_port, "WebConsole", timeout=20):
         logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
         clean_shutdown(None, None)
 
     logging.info("="*60)
     logging.info("Bulldog Alpha Platform Started Successfully!")
-    logging.info("Monitoring Dashboard: http://localhost:%d", FLAGS.web_port)
-    logging.info("BFF REST / WS API Gateway: http://localhost:%d", FLAGS.bff_port)
+    logging.info("Monitoring Dashboard: http://localhost:%d", web_port)
+    logging.info("BFF REST / WS API Gateway: http://localhost:%d", bff_port)
     logging.info("Log directory: %s", log_dir)
     logging.info("To stop all services cleanly, press Ctrl+C")
     logging.info("="*60)

@@ -145,5 +145,16 @@ class TestStartAllServices(unittest.TestCase):
         self.assertFalse(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=0.2))
         self.assertTrue(mock_sleep.called)
 
+    def test_validate_addr(self):
+        self.assertTrue(start_all_services.validate_addr("127.0.0.1:8080"))
+        self.assertTrue(start_all_services.validate_addr("[::1]:8080"))
+        self.assertTrue(start_all_services.validate_addr("localhost:80"))
+        
+        self.assertFalse(start_all_services.validate_addr("127.0.0.1"))
+        self.assertFalse(start_all_services.validate_addr("127.0.0.1:0"))
+        self.assertFalse(start_all_services.validate_addr("127.0.0.1:65536"))
+        self.assertFalse(start_all_services.validate_addr("127.0.0.1:abc"))
+        self.assertFalse(start_all_services.validate_addr(":8080"))
+
 if __name__ == '__main__':
     unittest.main()
