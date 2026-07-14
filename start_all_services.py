@@ -101,9 +101,6 @@ _SERVICE_STARTUP_TIMEOUT = datetime.timedelta(seconds=20)
 _POLL_INTERVAL = datetime.timedelta(seconds=0.1)
 _SOCKET_TIMEOUT = datetime.timedelta(seconds=0.5)
 
-processes = {}
-log_files = []
-
 def check_command_exists(cmd):
     return shutil.which(cmd) is not None
 
@@ -124,186 +121,197 @@ def wait_for_service(host, port, name, timeout):
     logging.error("SYSTEM: Timeout waiting for %s on %s:%d.", name, host, port)
     return False
 
-def clean_shutdown(signum, frame):
-    logging.warning("SYSTEM: Gracefully shutting down all components...")
-    
-    for name, proc in list(processes.items()):
-        logging.warning("SYSTEM: Stopping %s (PID: %d)...", name, proc.pid)
-        try:
-            # Send SIGTERM first
-            proc.terminate()
+class PlatformManager:
+    """Manages the lifecycle of all microservices in the monorepo."""
+
+    def __init__(self):
+        self.processes = {}
+        self.log_files = []
+        
+        # Register signal handlers to instance method
+        signal.signal(signal.SIGINT, self.clean_shutdown)
+        signal.signal(signal.SIGTERM, self.clean_shutdown)
+
+    def clean_shutdown(self, signum, frame):
+        logging.warning("SYSTEM: Gracefully shutting down all components...")
+        
+        for name, proc in list(self.processes.items()):
+            logging.warning("SYSTEM: Stopping %s (PID: %d)...", name, proc.pid)
             try:
-                proc.wait(timeout=_PROCESS_TERMINATE_TIMEOUT.total_seconds())
-            except subprocess.TimeoutExpired:
-                # Force kill if hung
-                proc.kill()
-                proc.wait()
-            logging.info("SYSTEM: %s stopped successfully.", name)
-        except Exception as e:
-            logging.error("SYSTEM: Failed to stop %s: %s", name, e)
-            
-    for f in log_files:
+                # Send SIGTERM first
+                proc.terminate()
+                try:
+                    proc.wait(timeout=_PROCESS_TERMINATE_TIMEOUT.total_seconds())
+                except subprocess.TimeoutExpired:
+                    # Force kill if hung
+                    proc.kill()
+                    proc.wait()
+                logging.info("SYSTEM: %s stopped successfully.", name)
+            except Exception as e:
+                logging.error("SYSTEM: Failed to stop %s: %s", name, e)
+                
+        for f in self.log_files:
+            try:
+                f.close()
+            except:
+                pass
+                
+        logging.info("SYSTEM: All components shut down. Goodbye!")
+        sys.exit(0)
+
+    def run(self):
+        workspace_dir = FLAGS.workspace_dir if FLAGS.workspace_dir else os.path.dirname(os.path.abspath(__file__))
+        os.chdir(workspace_dir)
+
+        # 1. Create logs directory
+        log_dir = os.path.join(workspace_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        logging.info("SYSTEM: Redirecting outputs to log files in: %s", log_dir)
+
+        # 2. Check and start Redis
+        logging.info("REDIS: Verifying Redis server availability...")
+        
+        redis_host, redis_port_str = FLAGS.redis_addr.rsplit(":", 1)
+        redis_port = int(redis_port_str)
+
+        # Check if redis is already listening
+        redis_running = False
         try:
-            f.close()
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(_SOCKET_TIMEOUT.total_seconds())
+            s.connect((redis_host, redis_port))
+            s.close()
+            redis_running = True
+            logging.info("REDIS: Redis server is already running on %s:%d.", redis_host, redis_port)
         except:
             pass
-            
-    logging.info("SYSTEM: All components shut down. Goodbye!")
-    sys.exit(0)
 
-# Register Ctrl+C handler
-signal.signal(signal.SIGINT, clean_shutdown)
-signal.signal(signal.SIGTERM, clean_shutdown)
+        if not redis_running:
+            if check_command_exists("redis-server"):
+                logging.warning("REDIS: Redis is not running. Launching redis-server on %s:%d...", redis_host, redis_port)
+                redis_log = open(os.path.join(log_dir, "redis.log"), "w")
+                self.log_files.append(redis_log)
+                proc = subprocess.Popen(["redis-server", "--port", str(redis_port)], stdout=redis_log, stderr=redis_log)
+                self.processes["Redis"] = proc
+                
+                # Wait for Redis to start up deterministically
+                if not wait_for_service(redis_host, redis_port, "Redis", timeout=_REDIS_STARTUP_TIMEOUT):
+                    logging.error("REDIS: Failed to start Redis server.")
+                    sys.exit(1)
+            else:
+                logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %s:%d first.", redis_host, redis_port)
+                sys.exit(1)
+
+        # 3. Start Backend Services via Bazel
+        bff_host, bff_port_str = FLAGS.bff_addr.rsplit(":", 1)
+        bff_port = int(bff_port_str)
+
+        components = {
+            "EMS": ["bazel", "run", "//cmd/ems"],
+            "RiskNode": ["bazel", "run", "//cmd/risk_node"],
+            "MDG": ["bazel", "run", "//cmd/mdg"],
+            "BFFGateway": ["bazel", "run", "//cmd/bff", "--", f"--port={bff_port}", f"--redis-addr={FLAGS.redis_addr}"]
+        }
+
+        if FLAGS.dev_mode:
+            components["BFFGateway"].append("--dev-mode")
+
+        port_mapping = {
+            "EMS": int(FLAGS.ems_addr.rsplit(":", 1)[1]),
+            "RiskNode": int(FLAGS.risk_addr.rsplit(":", 1)[1]),
+            "MDG": int(FLAGS.mdg_addr.rsplit(":", 1)[1]),
+            "BFFGateway": bff_port
+        }
+
+        for name, cmd in components.items():
+            logging.info("%s: Launching service via Bazel: %s...", name, ' '.join(cmd))
+            log_file = open(os.path.join(log_dir, f"{name.lower()}.log"), "w")
+            self.log_files.append(log_file)
+            
+            # Start process
+            proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, cwd=workspace_dir)
+            self.processes[name] = proc
+            
+            # Wait for the service to start up deterministically by checking its port
+            if not wait_for_service("127.0.0.1", port_mapping[name], name, timeout=_SERVICE_STARTUP_TIMEOUT):
+                logging.error("SYSTEM: Failed to verify that %s started successfully.", name)
+                self.clean_shutdown(None, None)
+
+        # 4. Handle web UI Setup and start
+        web_dir = os.path.join(workspace_dir, "web")
+        node_modules = os.path.join(web_dir, "node_modules")
+        
+        if not os.path.exists(node_modules):
+            if check_command_exists("npm"):
+                logging.warning("WEB: Initializing frontend. Running 'npm install' inside web/ (this may take a moment)...")
+                try:
+                    subprocess.run(["npm", "install"], cwd=web_dir, check=True)
+                    logging.info("WEB: Dependencies installed successfully.")
+                except subprocess.CalledProcessError as e:
+                    logging.error("WEB: Failed to run npm install: %s", e)
+                    self.clean_shutdown(None, None)
+            else:
+                logging.error("WEB: Error: 'npm' is not installed. You will not be able to run the React App server.")
+                self.clean_shutdown(None, None)
+
+        # Launch React App server
+        logging.info("WEB: Starting React Development Server (npm start)...")
+        web_log = open(os.path.join(log_dir, "web.log"), "w")
+        self.log_files.append(web_log)
+        
+        web_host, web_port_str = FLAGS.web_addr.rsplit(":", 1)
+        web_port = int(web_port_str)
+
+        # Configure PORT env variable for npm start
+        env = os.environ.copy()
+        env["PORT"] = str(web_port)
+        
+        proc = subprocess.Popen(["npm", "start"], stdout=web_log, stderr=web_log, cwd=web_dir, env=env)
+        self.processes["WebConsole"] = proc
+
+        # Wait for React to start up deterministically
+        if not wait_for_service("127.0.0.1", web_port, "WebConsole", timeout=_SERVICE_STARTUP_TIMEOUT):
+            logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
+            self.clean_shutdown(None, None)
+
+        logging.info("="*60)
+        logging.info("Bulldog Alpha Platform Started Successfully!")
+        logging.info("Monitoring Dashboard: http://localhost:%d", web_port)
+        logging.info("BFF REST / WS API Gateway: http://localhost:%d", bff_port)
+        logging.info("Log directory: %s", log_dir)
+        logging.info("To stop all services cleanly, press Ctrl+C")
+        logging.info("="*60)
+
+        # Monitor subprocesses using os.wait() (kernel-level event blocking)
+        while self.processes:
+            try:
+                pid, status = os.wait()
+                # Find which process exited
+                exited_name = None
+                for name, proc in list(self.processes.items()):
+                    if proc.pid == pid:
+                        exited_name = name
+                        break
+                
+                if exited_name:
+                    exit_code = (status >> 8) if (status & 0xff) == 0 else -(status & 0x7f)
+                    if exited_name == "BFFGateway":
+                        logging.warning("SYSTEM: BFFGateway (PID: %d) has exited with code %d. Shutting down all other services cleanly...", pid, exit_code)
+                        self.clean_shutdown(None, None)
+                    logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly with code %d.", exited_name, pid, exit_code)
+                    logging.warning("SYSTEM: Check %s/%s.log for error details.", log_dir, exited_name.lower())
+                    del self.processes[exited_name]
+            except ChildProcessError:
+                # No child processes left to wait for
+                break
+            except InterruptedError:
+                # Interrupted by signal handler (Ctrl+C)
+                continue
 
 def main(argv):
     del argv  # Unused
-    workspace_dir = FLAGS.workspace_dir if FLAGS.workspace_dir else os.path.dirname(os.path.abspath(__file__))
-    os.chdir(workspace_dir)
-
-    # 1. Create logs directory
-    log_dir = os.path.join(workspace_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    logging.info("SYSTEM: Redirecting outputs to log files in: %s", log_dir)
-
-    # 2. Check and start Redis
-    logging.info("REDIS: Verifying Redis server availability...")
-    
-    redis_host, redis_port_str = FLAGS.redis_addr.rsplit(":", 1)
-    redis_port = int(redis_port_str)
-
-    # Check if redis is already listening
-    redis_running = False
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(_SOCKET_TIMEOUT.total_seconds())
-        s.connect((redis_host, redis_port))
-        s.close()
-        redis_running = True
-        logging.info("REDIS: Redis server is already running on %s:%d.", redis_host, redis_port)
-    except:
-        pass
-
-    if not redis_running:
-        if check_command_exists("redis-server"):
-            logging.warning("REDIS: Redis is not running. Launching redis-server on %s:%d...", redis_host, redis_port)
-            redis_log = open(os.path.join(log_dir, "redis.log"), "w")
-            log_files.append(redis_log)
-            proc = subprocess.Popen(["redis-server", "--port", str(redis_port)], stdout=redis_log, stderr=redis_log)
-            processes["Redis"] = proc
-            
-            # Wait for Redis to start up deterministically
-            if not wait_for_service(redis_host, redis_port, "Redis", timeout=_REDIS_STARTUP_TIMEOUT):
-                logging.error("REDIS: Failed to start Redis server.")
-                sys.exit(1)
-        else:
-            logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %s:%d first.", redis_host, redis_port)
-            sys.exit(1)
-
-    # 3. Start Backend Services via Bazel
-    bff_host, bff_port_str = FLAGS.bff_addr.rsplit(":", 1)
-    bff_port = int(bff_port_str)
-
-    components = {
-        "EMS": ["bazel", "run", "//cmd/ems"],
-        "RiskNode": ["bazel", "run", "//cmd/risk_node"],
-        "MDG": ["bazel", "run", "//cmd/mdg"],
-        "BFFGateway": ["bazel", "run", "//cmd/bff", "--", f"--port={bff_port}", f"--redis-addr={FLAGS.redis_addr}"]
-    }
-
-    if FLAGS.dev_mode:
-        components["BFFGateway"].append("--dev-mode")
-
-    port_mapping = {
-        "EMS": int(FLAGS.ems_addr.rsplit(":", 1)[1]),
-        "RiskNode": int(FLAGS.risk_addr.rsplit(":", 1)[1]),
-        "MDG": int(FLAGS.mdg_addr.rsplit(":", 1)[1]),
-        "BFFGateway": bff_port
-    }
-
-    for name, cmd in components.items():
-        logging.info("%s: Launching service via Bazel: %s...", name, ' '.join(cmd))
-        log_file = open(os.path.join(log_dir, f"{name.lower()}.log"), "w")
-        log_files.append(log_file)
-        
-        # Start process
-        proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, cwd=workspace_dir)
-        processes[name] = proc
-        
-        # Wait for the service to start up deterministically by checking its port
-        if not wait_for_service("127.0.0.1", port_mapping[name], name, timeout=_SERVICE_STARTUP_TIMEOUT):
-            logging.error("SYSTEM: Failed to verify that %s started successfully.", name)
-            clean_shutdown(None, None)
-
-    # 4. Handle web UI Setup and start
-    web_dir = os.path.join(workspace_dir, "web")
-    node_modules = os.path.join(web_dir, "node_modules")
-    
-    if not os.path.exists(node_modules):
-        if check_command_exists("npm"):
-            logging.warning("WEB: Initializing frontend. Running 'npm install' inside web/ (this may take a moment)...")
-            try:
-                subprocess.run(["npm", "install"], cwd=web_dir, check=True)
-                logging.info("WEB: Dependencies installed successfully.")
-            except subprocess.CalledProcessError as e:
-                logging.error("WEB: Failed to run npm install: %s", e)
-                clean_shutdown(None, None)
-        else:
-            logging.error("WEB: Error: 'npm' is not installed. You will not be able to run the React App server.")
-            clean_shutdown(None, None)
-
-    # Launch React App server
-    logging.info("WEB: Starting React Development Server (npm start)...")
-    web_log = open(os.path.join(log_dir, "web.log"), "w")
-    log_files.append(web_log)
-    
-    web_host, web_port_str = FLAGS.web_addr.rsplit(":", 1)
-    web_port = int(web_port_str)
-
-    # Configure PORT env variable for npm start
-    env = os.environ.copy()
-    env["PORT"] = str(web_port)
-    
-    proc = subprocess.Popen(["npm", "start"], stdout=web_log, stderr=web_log, cwd=web_dir, env=env)
-    processes["WebConsole"] = proc
-
-    # Wait for React to start up deterministically
-    if not wait_for_service("127.0.0.1", web_port, "WebConsole", timeout=_SERVICE_STARTUP_TIMEOUT):
-        logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
-        clean_shutdown(None, None)
-
-    logging.info("="*60)
-    logging.info("Bulldog Alpha Platform Started Successfully!")
-    logging.info("Monitoring Dashboard: http://localhost:%d", web_port)
-    logging.info("BFF REST / WS API Gateway: http://localhost:%d", bff_port)
-    logging.info("Log directory: %s", log_dir)
-    logging.info("To stop all services cleanly, press Ctrl+C")
-    logging.info("="*60)
-
-    # Monitor subprocesses using os.wait() (kernel-level event blocking)
-    while processes:
-        try:
-            pid, status = os.wait()
-            # Find which process exited
-            exited_name = None
-            for name, proc in list(processes.items()):
-                if proc.pid == pid:
-                    exited_name = name
-                    break
-            
-            if exited_name:
-                exit_code = (status >> 8) if (status & 0xff) == 0 else -(status & 0x7f)
-                if exited_name == "BFFGateway":
-                    logging.warning("SYSTEM: BFFGateway (PID: %d) has exited with code %d. Shutting down all other services cleanly...", pid, exit_code)
-                    clean_shutdown(None, None)
-                logging.warning("SYSTEM: Warning: %s (PID: %d) exited unexpectedly with code %d.", exited_name, pid, exit_code)
-                logging.warning("SYSTEM: Check %s/%s.log for error details.", log_dir, exited_name.lower())
-                del processes[exited_name]
-        except ChildProcessError:
-            # No child processes left to wait for
-            break
-        except InterruptedError:
-            # Interrupted by signal handler (Ctrl+C)
-            continue
+    manager = PlatformManager()
+    manager.run()
 
 if __name__ == "__main__":
     app.run(main)

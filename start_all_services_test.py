@@ -76,24 +76,17 @@ class TestStartAllServices(unittest.TestCase):
         mock_proc = MagicMock()
         mock_file = MagicMock()
         
-        # Save old values
-        old_processes = start_all_services.processes
-        old_log_files = start_all_services.log_files
+        manager = start_all_services.PlatformManager()
+        manager.processes = {"MockService": mock_proc}
+        manager.log_files = [mock_file]
         
-        try:
-            start_all_services.processes = {"MockService": mock_proc}
-            start_all_services.log_files = [mock_file]
-            
-            start_all_services.clean_shutdown(None, None)
-            
-            mock_proc.terminate.assert_called_once()
-            mock_file.close.assert_called_once()
-            mock_exit.assert_called_once_with(0)
-        finally:
-            start_all_services.processes = old_processes
-            start_all_services.log_files = old_log_files
+        manager.clean_shutdown(None, None)
+        
+        mock_proc.terminate.assert_called_once()
+        mock_file.close.assert_called_once()
+        mock_exit.assert_called_once_with(0)
 
-    @patch('start_all_services.clean_shutdown')
+    @patch('start_all_services.PlatformManager.clean_shutdown')
     @patch('subprocess.Popen')
     @patch('builtins.open', new_callable=mock_open)
     @patch('os.makedirs')
