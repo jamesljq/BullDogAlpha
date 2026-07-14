@@ -141,10 +141,16 @@ func runIngestionLoop(ctx context.Context, pubSocket MessageSender, wsURL, key s
 
 		// Handle connection drops and apply exponential backoff.
 		backoffDuration := time.Duration(math.Min(float64(maxBackoff), math.Pow(2, backoffAttempt)*100)) * time.Millisecond
-		slog.Warn("WebSocket disconnected, retrying with exponential backoff",
-			"error", err,
-			"backoff_duration", backoffDuration.String(),
-			"attempt", int(backoffAttempt+1))
+		if key == "" {
+			slog.Info("MDG: Local development mode active (no Polygon API key). Gateway is serving health checks on port 50053.",
+				"retry_backoff", backoffDuration.String(),
+				"error", err.Error())
+		} else {
+			slog.Warn("WebSocket disconnected, retrying with exponential backoff",
+				"error", err,
+				"backoff_duration", backoffDuration.String(),
+				"attempt", int(backoffAttempt+1))
+		}
 
 		select {
 		case <-ctx.Done():
