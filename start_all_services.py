@@ -75,8 +75,6 @@ def validate_addr(addr):
     if ":" not in addr:
         return False
     parts = addr.rsplit(":", 1)
-    if len(parts) != 2:
-        return False
     host, port_str = parts
     if not host:
         return False
