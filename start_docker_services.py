@@ -104,7 +104,7 @@ class DockerOrchestrator:
 
         # 4. Launch Docker Compose up
         logging.info("SYSTEM: Launching Docker Compose cluster...")
-        compose_cmd = ["docker", "compose", "up", "--build"]
+        compose_cmd = ["docker", "compose", "up", "--build", "--abort-on-container-exit"]
         
         try:
             # This will block until the user exits or containers exit.
