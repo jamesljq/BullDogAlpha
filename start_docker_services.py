@@ -94,7 +94,9 @@ class DockerOrchestrator:
             src_path = os.path.join(workspace_dir, "bazel-bin", "cmd", svc, f"{svc}_", svc)
             dst_path = os.path.join(bin_dir, svc)
             try:
-                # shutil.copy2 follows symlinks automatically
+                # Remove existing read-only file if present to avoid permission errors
+                if os.path.exists(dst_path):
+                    os.remove(dst_path)
                 shutil.copy2(src_path, dst_path)
             except Exception as e:
                 logging.error("SYSTEM: Failed to stage binary for %s: %s", svc, e)

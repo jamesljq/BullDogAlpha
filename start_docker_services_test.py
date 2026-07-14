@@ -48,7 +48,8 @@ class TestStartDockerServices(unittest.TestCase):
     @patch('platform.machine')
     @patch('shutil.which')
     @patch('sys.exit')
-    def test_orchestration_run(self, mock_exit, mock_which, mock_machine, mock_makedirs, mock_copy2, mock_run):
+    @patch('os.remove')
+    def test_orchestration_run(self, mock_remove, mock_exit, mock_which, mock_machine, mock_makedirs, mock_copy2, mock_run):
         mock_which.return_value = '/usr/bin/tool'
         
         # 1. Test arm64 path
@@ -67,10 +68,12 @@ class TestStartDockerServices(unittest.TestCase):
         
         # Assert copy2 called for all services
         self.assertEqual(mock_copy2.call_count, 4)
+        self.assertEqual(mock_remove.call_count, 4)
         
         # 2. Test x86_64 path
         mock_run.reset_mock()
         mock_copy2.reset_mock()
+        mock_remove.reset_mock()
         mock_machine.return_value = 'x86_64'
         
         with patch('os.path.exists', return_value=True):
