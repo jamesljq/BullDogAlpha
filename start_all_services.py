@@ -295,7 +295,13 @@ class PlatformManager:
                         break
                 
                 if exited_name:
-                    exit_code = (status >> 8) if (status & 0xff) == 0 else -(status & 0x7f)
+                    if os.WIFEXITED(status):
+                        exit_code = os.WEXITSTATUS(status)
+                    elif os.WIFSIGNALED(status):
+                        exit_code = -os.WTERMSIG(status)
+                    else:
+                        exit_code = status
+
                     if exited_name == "BFFGateway":
                         logging.warning("SYSTEM: BFFGateway (PID: %d) has exited with code %d. Shutting down all other services cleanly...", pid, exit_code)
                         self.clean_shutdown(None, None)
