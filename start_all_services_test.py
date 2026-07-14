@@ -54,15 +54,16 @@ class TestStartAllServices(unittest.TestCase):
 
         with patch('os.path.exists', return_value=True):
             # Run main, trigger SystemExit after launching all processes
-            with patch('time.sleep', side_effect=mock_sleep):
-                with self.assertRaises(SystemExit):
-                    start_all_services.main(['start_all_services.py'])
+            with patch('start_all_services.wait_for_service', return_value=True):
+                with patch('time.sleep', side_effect=mock_sleep):
+                    with self.assertRaises(SystemExit):
+                        start_all_services.main(['start_all_services.py'])
         
         # Assert processes started
         self.assertTrue(mock_popen.called)
         calls = [c[0][0] for c in mock_popen.call_args_list]
         
-        self.assertIn(['redis-server'], calls)
+        self.assertIn(['redis-server', '--port', '6379'], calls)
         self.assertTrue(any('//cmd/ems' in cmd for cmd in calls))
         self.assertTrue(any('//cmd/risk_node' in cmd for cmd in calls))
         self.assertTrue(any('//cmd/mdg' in cmd for cmd in calls))
@@ -119,10 +120,30 @@ class TestStartAllServices(unittest.TestCase):
         mock_clean_shutdown.side_effect = SystemExit()
         
         with patch('os.path.exists', return_value=True):
-            with self.assertRaises(SystemExit):
-                start_all_services.main(['start_all_services.py'])
+            with patch('start_all_services.wait_for_service', return_value=True):
+                with self.assertRaises(SystemExit):
+                    start_all_services.main(['start_all_services.py'])
                 
         mock_clean_shutdown.assert_called_once()
+
+    @patch('socket.socket')
+    def test_wait_for_service_success(self, mock_socket):
+        mock_sock_inst = MagicMock()
+        mock_socket.return_value = mock_sock_inst
+        mock_sock_inst.connect.return_value = None
+        
+        self.assertTrue(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=1))
+        mock_sock_inst.connect.assert_called_once_with(("127.0.0.1", 8080))
+
+    @patch('time.sleep')
+    @patch('socket.socket')
+    def test_wait_for_service_timeout(self, mock_socket, mock_sleep):
+        mock_sock_inst = MagicMock()
+        mock_socket.return_value = mock_sock_inst
+        mock_sock_inst.connect.side_effect = Exception("conn failed")
+        
+        self.assertFalse(start_all_services.wait_for_service("127.0.0.1", 8080, "TestService", timeout=0.2))
+        self.assertTrue(mock_sleep.called)
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,18 +5,44 @@ import time
 import subprocess
 import signal
 import shutil
+import socket
 from absl import app
 from absl import flags
 from absl import logging
 
 FLAGS = flags.FLAGS
+flags.DEFINE_string("redis_host", "127.0.0.1", "Redis server host.")
+flags.DEFINE_integer("redis_port", 6379, "Redis server port.")
 flags.DEFINE_string("workspace_dir", "", "Path to the platform workspace directory. If empty, uses the script directory.")
+flags.DEFINE_boolean("dev_mode", True, "Enable developer mode controls on BFF Gateway.")
+flags.DEFINE_integer("bff_port", 8080, "BFF Gateway port.")
+flags.DEFINE_string("mdg_addr", "localhost:50053", "MDG gRPC address.")
+flags.DEFINE_string("risk_addr", "localhost:50051", "Risk Node gRPC address.")
+flags.DEFINE_string("ems_addr", "localhost:50052", "EMS gRPC address.")
+flags.DEFINE_string("engine_addr", "localhost:50054", "Alpha Engine mock gRPC address.")
+flags.DEFINE_integer("web_port", 3000, "Web Console port.")
 
 processes = {}
 log_files = []
 
 def check_command_exists(cmd):
     return shutil.which(cmd) is not None
+
+def wait_for_service(host, port, name, timeout=15):
+    logging.info("SYSTEM: Waiting for %s to become available on %s:%d...", name, host, port)
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect((host, port))
+            s.close()
+            logging.info("SYSTEM: %s is now available.", name)
+            return True
+        except Exception:
+            time.sleep(0.1)
+    logging.error("SYSTEM: Timeout waiting for %s on %s:%d.", name, host, port)
+    return False
 
 def clean_shutdown(signum, frame):
     logging.warning("SYSTEM: Gracefully shutting down all components...")
@@ -61,25 +87,33 @@ def main(argv):
 
     # 2. Check and start Redis
     logging.info("REDIS: Verifying Redis server availability...")
-    # Check if redis is already listening on 6379
+    
+    # Check if redis is already listening
+    redis_running = False
     try:
-        import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1)
-        s.connect(("127.0.0.1", 6379))
+        s.settimeout(0.5)
+        s.connect((FLAGS.redis_host, FLAGS.redis_port))
         s.close()
-        logging.info("REDIS: Redis server is already running on port 6379.")
+        redis_running = True
+        logging.info("REDIS: Redis server is already running on port %d.", FLAGS.redis_port)
     except:
-        # Not running, let's start it
+        pass
+
+    if not redis_running:
         if check_command_exists("redis-server"):
-            logging.warning("REDIS: Redis is not running. Launching redis-server...")
+            logging.warning("REDIS: Redis is not running. Launching redis-server on port %d...", FLAGS.redis_port)
             redis_log = open(os.path.join(log_dir, "redis.log"), "w")
             log_files.append(redis_log)
-            proc = subprocess.Popen(["redis-server"], stdout=redis_log, stderr=redis_log)
+            proc = subprocess.Popen(["redis-server", "--port", str(FLAGS.redis_port)], stdout=redis_log, stderr=redis_log)
             processes["Redis"] = proc
-            time.sleep(1) # Allow redis to initialize
+            
+            # Wait for Redis to start up deterministically
+            if not wait_for_service(FLAGS.redis_host, FLAGS.redis_port, "Redis", timeout=10):
+                logging.error("REDIS: Failed to start Redis server.")
+                sys.exit(1)
         else:
-            logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on 6379 first.")
+            logging.error("REDIS: Error: redis-server command not found. Please install and run Redis on %d first.", FLAGS.redis_port)
             sys.exit(1)
 
     # 3. Start Backend Services via Bazel
@@ -87,7 +121,17 @@ def main(argv):
         "EMS": ["bazel", "run", "//cmd/ems"],
         "RiskNode": ["bazel", "run", "//cmd/risk_node"],
         "MDG": ["bazel", "run", "//cmd/mdg"],
-        "BFFGateway": ["bazel", "run", "//cmd/bff", "--", "--port=8080", "--redis-addr=localhost:6379", "--dev-mode"]
+        "BFFGateway": ["bazel", "run", "//cmd/bff", "--", f"--port={FLAGS.bff_port}", f"--redis-addr={FLAGS.redis_host}:{FLAGS.redis_port}"]
+    }
+
+    if FLAGS.dev_mode:
+        components["BFFGateway"].append("--dev-mode")
+
+    port_mapping = {
+        "EMS": 50052,
+        "RiskNode": 50051,
+        "MDG": 50053,
+        "BFFGateway": FLAGS.bff_port
     }
 
     for name, cmd in components.items():
@@ -98,7 +142,11 @@ def main(argv):
         # Start process
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, cwd=workspace_dir)
         processes[name] = proc
-        time.sleep(0.5) # Prevent build output collision logs
+        
+        # Wait for the service to start up deterministically by checking its port
+        if not wait_for_service("127.0.0.1", port_mapping[name], name, timeout=20):
+            logging.error("SYSTEM: Failed to verify that %s started successfully.", name)
+            clean_shutdown(None, None)
 
     # 4. Handle web UI Setup and start
     web_dir = os.path.join(workspace_dir, "web")
@@ -122,13 +170,22 @@ def main(argv):
     web_log = open(os.path.join(log_dir, "web.log"), "w")
     log_files.append(web_log)
     
-    proc = subprocess.Popen(["npm", "start"], stdout=web_log, stderr=web_log, cwd=web_dir)
+    # Configure PORT env variable for npm start
+    env = os.environ.copy()
+    env["PORT"] = str(FLAGS.web_port)
+    
+    proc = subprocess.Popen(["npm", "start"], stdout=web_log, stderr=web_log, cwd=web_dir, env=env)
     processes["WebConsole"] = proc
+
+    # Wait for React to start up deterministically
+    if not wait_for_service("127.0.0.1", FLAGS.web_port, "WebConsole", timeout=20):
+        logging.error("SYSTEM: Failed to verify that WebConsole started successfully.")
+        clean_shutdown(None, None)
 
     logging.info("="*60)
     logging.info("Bulldog Alpha Platform Started Successfully!")
-    logging.info("Monitoring Dashboard: http://localhost:3000")
-    logging.info("BFF REST / WS API Gateway: http://localhost:8080")
+    logging.info("Monitoring Dashboard: http://localhost:%d", FLAGS.web_port)
+    logging.info("BFF REST / WS API Gateway: http://localhost:%d", FLAGS.bff_port)
     logging.info("Log directory: %s", log_dir)
     logging.info("To stop all services cleanly, press Ctrl+C")
     logging.info("="*60)
