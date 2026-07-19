@@ -23,6 +23,8 @@ import (
 	"bulldog_alpha/proto/order"
 )
 
+var notifyContext = signal.NotifyContext
+
 // CircuitBreakerState represents the current state of the trading lifecycle.
 type CircuitBreakerState string
 
@@ -45,6 +47,18 @@ type SystemStatusMsg struct {
 	SystemState string                  `json:"system_state"` // OK or DEGRADED
 	Services    map[string]HealthStatus `json:"services"`
 	DevMode     bool                    `json:"dev_mode"`
+}
+
+var bffPingInterval = 3 * time.Second
+
+var wsAcceptAndWrap = func(w http.ResponseWriter, r *http.Request) (WebSocketConn, error) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &realWS{Conn: conn}, nil
 }
 
 type BFFServer struct {
@@ -183,15 +197,12 @@ func (bff *BFFServer) broadcast(msg interface{}) {
 }
 
 func (bff *BFFServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	ws, err := wsAcceptAndWrap(w, r)
 	if err != nil {
 		slog.Error("failed_to_accept_websocket_connection", "error", err)
 		return
 	}
 
-	ws := &realWS{Conn: conn}
 	ctx, cancel := context.WithCancel(r.Context())
 	bff.registerClient(ws, cancel)
 
@@ -223,7 +234,7 @@ func (bff *BFFServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Ping loop for leak protection and stale socket detection
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
+		ticker := time.NewTicker(bffPingInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -817,6 +828,8 @@ func runBFF(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+var runBFFHook = runBFF
+
 func main() {
 	port := flag.String("port", "8080", "BFF server port")
 	redisAddr := flag.String("redis-addr", "localhost:6379", "Redis connection address")
@@ -832,7 +845,7 @@ func main() {
 
 	slog.Info("starting_bff_gateway", "port", *port, "redis_addr", *redisAddr)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	cfg := Config{
@@ -845,8 +858,8 @@ func main() {
 		DevMode:    *devMode,
 	}
 
-	if err := runBFF(ctx, cfg); err != nil {
+	if err := runBFFHook(ctx, cfg); err != nil {
 		slog.Error("bff_run_failed", "error", err)
-		os.Exit(1)
+		osExit(1)
 	}
 }

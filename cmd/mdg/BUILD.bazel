@@ -30,8 +30,10 @@ go_test(
     embed = [":mdg_lib"],
     deps = [
         "//proto:market_data_go_proto",
+        "@com_github_alicebob_miniredis_v2//:miniredis",
         "@com_github_coder_websocket//:websocket",
         "@com_github_go_zeromq_zmq4//:zmq4",
+        "@com_github_redis_go_redis_v9//:go-redis",
         "@org_golang_google_protobuf//proto",
     ],
 )

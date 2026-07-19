@@ -28,6 +28,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var notifyContext = signal.NotifyContext
+var protoMarshal = proto.Marshal
+var jsonMarshal = json.Marshal
+var osExit = os.Exit
+
 // RawTick represents the raw JSON message format expected from the websocket.
 type RawTick struct {
 	Symbol    string  `json:"sym"`
@@ -81,14 +86,16 @@ var newPubSocket = func(ctx context.Context) zmq4.Socket {
 	return zmq4.NewPub(ctx)
 }
 
+var runAppHook = runApp
+
 func main() {
 	flag.Parse()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runApp(ctx, *feedURL, *apiKey, *zmqAddr); err != nil {
+	if err := runAppHook(ctx, *feedURL, *apiKey, *zmqAddr); err != nil {
 		slog.Error("MDG terminated with fatal error", "error", err)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
@@ -164,7 +171,7 @@ func runMain(ctx context.Context, wsURL, key, bindAddr string) error {
 				}
 			} else {
 				// Initialize Redis with default tickers
-				defJSON, _ := json.Marshal(activeTickers)
+				defJSON, _ := jsonMarshal(activeTickers)
 				rdb.Set(ctx, "mdg:active_tickers", string(defJSON), 0)
 			}
 
@@ -349,13 +356,13 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key, 
 				"key":    parts[0],
 				"secret": parts[1],
 			}
-			authBytes, err = json.Marshal(authMsg)
+			authBytes, err = jsonMarshal(authMsg)
 		} else {
 			authMsg := map[string]interface{}{
 				"action": "auth",
 				"params": key,
 			}
-			authBytes, err = json.Marshal(authMsg)
+			authBytes, err = jsonMarshal(authMsg)
 		}
 
 		if err != nil {
@@ -379,7 +386,7 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key, 
 					"action": "subscribe",
 					"trades": tickers,
 				}
-				subBytes, err := json.Marshal(subMsg)
+				subBytes, err := jsonMarshal(subMsg)
 				if err != nil {
 					return fmt.Errorf("failed to marshal subscribe message: %w", err)
 				}
@@ -403,7 +410,7 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key, 
 				"action": "subscribe",
 				"params": strings.Join(formatted, ","),
 			}
-			subBytes, err := json.Marshal(subMsg)
+			subBytes, err := jsonMarshal(subMsg)
 			if err != nil {
 				return fmt.Errorf("failed to marshal subscribe message: %w", err)
 			}
@@ -518,7 +525,7 @@ func processAndPublish(payload []byte, pubSocket MessageSender) {
 			CorrelationId: correlationID,
 		}
 
-		protoBytes, err := proto.Marshal(equityTick)
+		protoBytes, err := protoMarshal(equityTick)
 		if err != nil {
 			slog.Error("Failed to marshal EquityTick to protobuf",
 				"error", err,
@@ -543,7 +550,7 @@ func processAndPublish(payload []byte, pubSocket MessageSender) {
 		}
 
 		if rdbClient != nil {
-			tickBytes, err := json.Marshal(tick)
+			tickBytes, err := jsonMarshal(tick)
 			if err == nil {
 				rdbClient.Publish(context.Background(), "mdg:ticks", string(tickBytes))
 			}
