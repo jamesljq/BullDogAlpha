@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"strings"
 	"syscall"
 	"time"
 
@@ -426,6 +427,216 @@ func (bff *BFFServer) HandleStateAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+func (bff *BFFServer) HandleMdgConfigAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+	tickersJSON, err := bff.redisClient.Get(ctx, "mdg:active_tickers").Result()
+	var tickers []string
+	if err == nil && tickersJSON != "" {
+		_ = json.Unmarshal([]byte(tickersJSON), &tickers)
+	} else {
+		tickers = []string{"AAPL", "MSFT", "TSLA", "AMZN", "NVDA"}
+	}
+
+	vendor, err := bff.redisClient.Get(ctx, "mdg:vendor").Result()
+	if err != nil || vendor == "" {
+		vendor = "polygon"
+	}
+
+	status, err := bff.redisClient.Get(ctx, "mdg:status").Result()
+	if err != nil || status == "" {
+		status = "RUNNING"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"tickers": tickers,
+		"vendor":  vendor,
+		"status":  status,
+	})
+}
+
+func (bff *BFFServer) HandleMdgSubscriptionsAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // "add" or "remove"
+		Ticker string `json:"ticker"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	tickersJSON, err := bff.redisClient.Get(ctx, "mdg:active_tickers").Result()
+	var tickers []string
+	if err == nil && tickersJSON != "" {
+		_ = json.Unmarshal([]byte(tickersJSON), &tickers)
+	} else {
+		tickers = []string{"AAPL", "MSFT", "TSLA", "AMZN", "NVDA"}
+	}
+
+	req.Ticker = strings.ToUpper(strings.TrimSpace(req.Ticker))
+	if req.Ticker == "" {
+		http.Error(w, "ticker cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	changed := false
+	if req.Action == "add" {
+		exists := false
+		for _, t := range tickers {
+			if t == req.Ticker {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			tickers = append(tickers, req.Ticker)
+			changed = true
+		}
+	} else if req.Action == "remove" {
+		var newList []string
+		for _, t := range tickers {
+			if t != req.Ticker {
+				newList = append(newList, t)
+			} else {
+				changed = true
+			}
+		}
+		tickers = newList
+	} else {
+		http.Error(w, "invalid action", http.StatusBadRequest)
+		return
+	}
+
+	if changed {
+		newJSON, _ := json.Marshal(tickers)
+		_ = bff.redisClient.Set(ctx, "mdg:active_tickers", string(newJSON), 0).Err()
+
+		evtPayload, _ := json.Marshal(map[string]interface{}{
+			"action":  "update_subscriptions",
+			"tickers": tickers,
+		})
+		bff.redisClient.Publish(ctx, "mdg:control_events", string(evtPayload))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "tickers": tickers})
+}
+
+func (bff *BFFServer) HandleMdgControlAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // "pause", "resume", "set_vendor"
+		Vendor string `json:"vendor"` // "polygon" or "alpaca"
+		URL    string `json:"url"`    // optional custom stream URL
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	var evtPayload []byte
+
+	switch req.Action {
+	case "pause":
+		_ = bff.redisClient.Set(ctx, "mdg:status", "PAUSED", 0)
+		evtPayload, _ = json.Marshal(map[string]interface{}{
+			"action": "pause",
+		})
+	case "resume":
+		_ = bff.redisClient.Set(ctx, "mdg:status", "RUNNING", 0)
+		evtPayload, _ = json.Marshal(map[string]interface{}{
+			"action": "resume",
+		})
+	case "set_vendor":
+		if req.Vendor != "polygon" && req.Vendor != "alpaca" {
+			http.Error(w, "invalid vendor; must be polygon or alpaca", http.StatusBadRequest)
+			return
+		}
+		_ = bff.redisClient.Set(ctx, "mdg:vendor", req.Vendor, 0)
+		evtPayload, _ = json.Marshal(map[string]interface{}{
+			"action": "set_vendor",
+			"vendor": req.Vendor,
+			"url":    req.URL,
+		})
+	default:
+		http.Error(w, "invalid action", http.StatusBadRequest)
+		return
+	}
+
+	bff.redisClient.Publish(ctx, "mdg:control_events", string(evtPayload))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (bff *BFFServer) HandleMdgTradesAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		bff.HandleMdgGetTradesAPI(w, r)
+	} else if r.Method == http.MethodPost {
+		bff.HandleMdgAddTradeAPI(w, r)
+	} else {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (bff *BFFServer) HandleMdgGetTradesAPI(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tradesJSON, err := bff.redisClient.LRange(ctx, "mdg:trades", 0, -1).Result()
+	if err != nil {
+		tradesJSON = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte("[" + strings.Join(tradesJSON, ",") + "]"))
+}
+
+func (bff *BFFServer) HandleMdgAddTradeAPI(w http.ResponseWriter, r *http.Request) {
+	var trade struct {
+		Symbol    string  `json:"symbol"`
+		Price     float64 `json:"price"`
+		Qty       float64 `json:"qty"`
+		Action    string  `json:"action"` // "BUY" or "SELL"
+		Timestamp int64   `json:"timestamp"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&trade); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if trade.Timestamp == 0 {
+		trade.Timestamp = time.Now().UnixNano() / int64(time.Millisecond)
+	}
+
+	tradeJSON, _ := json.Marshal(trade)
+	ctx := r.Context()
+	bff.redisClient.LPush(ctx, "mdg:trades", string(tradeJSON))
+	bff.redisClient.LTrim(ctx, "mdg:trades", 0, 999)
+
+	bff.broadcast(map[string]interface{}{
+		"type":  "trade_execution",
+		"trade": trade,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "trade": trade})
+}
+
 func (bff *BFFServer) broadcastStatus() {
 	bff.stateMutex.RLock()
 	services := make(map[string]HealthStatus)
@@ -547,6 +758,32 @@ func runBFF(ctx context.Context, cfg Config) error {
 	bff := NewBFFServer(rdb, cfg.MdgAddr, cfg.RiskAddr, cfg.EmsAddr, cfg.EngineAddr)
 	bff.devMode = cfg.DevMode
 
+	// Subscribe to live market data ticks from MDG via Redis PubSub
+	go func() {
+		pubsub := rdb.Subscribe(ctx, "mdg:ticks")
+		defer pubsub.Close()
+		ch := pubsub.Channel()
+		slog.Info("BFF subscribed to Redis channel mdg:ticks")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				var tick map[string]interface{}
+				if err := json.Unmarshal([]byte(msg.Payload), &tick); err != nil {
+					continue
+				}
+				bff.broadcast(map[string]interface{}{
+					"type": "tick",
+					"tick": tick,
+				})
+			}
+		}
+	}()
+
 	go bff.StartHealthCheckLoop(ctx)
 
 	mux := http.NewServeMux()
@@ -555,6 +792,10 @@ func runBFF(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("/api/config", bff.HandleConfigAPI)
 	mux.HandleFunc("/api/state", bff.HandleStateAPI)
 	mux.HandleFunc("/api/shutdown", bff.HandleShutdownAPI)
+	mux.HandleFunc("/api/mdg/config", bff.HandleMdgConfigAPI)
+	mux.HandleFunc("/api/mdg/subscriptions", bff.HandleMdgSubscriptionsAPI)
+	mux.HandleFunc("/api/mdg/control", bff.HandleMdgControlAPI)
+	mux.HandleFunc("/api/mdg/trades", bff.HandleMdgTradesAPI)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

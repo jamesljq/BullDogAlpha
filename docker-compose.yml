@@ -2,6 +2,9 @@ services:
   redis:
     image: redis:alpine
     container_name: bulldog_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     ports:
       - "6379:6379"
 
@@ -39,7 +42,8 @@ services:
     container_name: bulldog_mdg
     command: [
       "--feed-url=${FEED_URL:-ws://bff:8080/polygon}",
-      "--api-key=${FEED_API_KEY:-}"
+      "--api-key=${FEED_API_KEY:-}",
+      "--redis-addr=redis:6379"
     ]
     ports:
       - "50053:50053"
@@ -81,3 +85,6 @@ services:
       - VITE_BFF_TARGET=http://bff:8080
     depends_on:
       - bff
+
+volumes:
+  redis_data:

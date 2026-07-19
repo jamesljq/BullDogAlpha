@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createChart } from 'lightweight-charts';
 
 // Types matching the Go BFF JSON messages
 interface HealthStatus {
@@ -14,7 +15,16 @@ interface SystemStatusMsg {
   dev_mode?: boolean;
 }
 
+interface TradeMarker {
+  symbol: string;
+  price: number;
+  qty: number;
+  action: "BUY" | "SELL";
+  timestamp: number; // epoch ms
+}
+
 export default function App() {
+  // Original states preserved
   const [circuitState, setCircuitState] = useState<"RUNNING" | "PAUSED" | "TERMINATED">("RUNNING");
   const [systemState, setSystemState] = useState<"OK" | "DEGRADED">("OK");
   const [services, setServices] = useState<Record<string, HealthStatus>>({
@@ -30,13 +40,27 @@ export default function App() {
   const [trendStrategyActive, setTrendStrategyActive] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [devMode, setDevMode] = useState<boolean>(false);
-  
+
+  // New MDG / Market Data visualization states
+  const [activeVendor, setActiveVendor] = useState<"polygon" | "alpaca">("polygon");
+  const [mdgStatus, setMdgStatus] = useState<"RUNNING" | "PAUSED">("RUNNING");
+  const [subscriptions, setSubscriptions] = useState<string[]>([]);
+  const [selectedTicker, setSelectedTicker] = useState<string>("");
+  const [newTickerInput, setNewTickerInput] = useState<string>("");
+  const [tickData, setTickData] = useState<Record<string, Array<{ time: number, value: number }>>>({});
+  const [trades, setTrades] = useState<TradeMarker[]>([]);
+
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<any>(null);
+  const lineSeriesRef = useRef<any>(null);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
     connectWS();
+    fetchMdgConfig();
+    fetchTrades();
     return () => {
       if (wsRef.current) wsRef.current.close();
     };
@@ -84,6 +108,35 @@ export default function App() {
           addLog(`State sync: Circuit=${status.state}, Health=${status.system_state}`);
         } else if (data.type === "config_update") {
           addLog(`Risk configuration updated online: ${JSON.stringify(data.config)}`);
+        } else if (data.type === "tick" && data.tick) {
+          const t = data.tick;
+          const tickTime = Math.floor(t.t / 1000);
+          
+          setTickData(prev => {
+            const currentTicks = prev[t.sym] || [];
+            const lastTick = currentTicks[currentTicks.length - 1];
+            
+            let newTicks;
+            if (lastTick && lastTick.time === tickTime) {
+              lastTick.value = t.p;
+              newTicks = [...currentTicks];
+            } else {
+              newTicks = [...currentTicks, { time: tickTime, value: t.p }];
+            }
+            
+            if (newTicks.length > 500) {
+              newTicks = newTicks.slice(-500);
+            }
+            
+            return {
+              ...prev,
+              [t.sym]: newTicks
+            };
+          });
+        } else if (data.type === "trade_execution" && data.trade) {
+          const newTrade = data.trade as TradeMarker;
+          setTrades(prev => [newTrade, ...prev]);
+          addLog(`Trade execution: ${newTrade.action} 100 ${newTrade.symbol} @ $${newTrade.price}`);
         }
       } catch (err) {
         addLog(`Error parsing payload: ${event.data}`);
@@ -101,7 +154,7 @@ export default function App() {
     };
   };
 
-  // Trigger high-priority OOB circuit breaker state
+  // Original risk limits & circuit control actions preserved
   const sendOOBAction = (action: "pause" | "panic", reason: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action, reason }));
@@ -111,7 +164,6 @@ export default function App() {
     }
   };
 
-  // Safe Resume handshake request
   const requestResume = async () => {
     addLog("Initiating three-stage safe resume handshake wizard...");
     try {
@@ -131,7 +183,6 @@ export default function App() {
     }
   };
 
-  // Publish risk configuration
   const publishConfig = async (pos: number, lev: number) => {
     try {
       const resp = await fetch("/api/config", {
@@ -149,6 +200,226 @@ export default function App() {
     }
   };
 
+  // New MDG Control actions
+  const fetchMdgConfig = async () => {
+    try {
+      const resp = await fetch("/api/mdg/config");
+      if (resp.ok) {
+        const data = await resp.json();
+        setSubscriptions(data.tickers || []);
+        setActiveVendor(data.vendor || "polygon");
+        setMdgStatus(data.status || "RUNNING");
+        if (data.tickers && data.tickers.length > 0 && !selectedTicker) {
+          setSelectedTicker(data.tickers[0]);
+        }
+      }
+    } catch (err) {
+      addLog(`Failed to fetch MDG configuration: ${err}`);
+    }
+  };
+
+  const fetchTrades = async () => {
+    try {
+      const resp = await fetch("/api/mdg/trades");
+      if (resp.ok) {
+        const data = await resp.json();
+        setTrades(data || []);
+      }
+    } catch (err) {
+      addLog(`Failed to fetch historical trades: ${err}`);
+    }
+  };
+
+  const addSubscription = async (ticker: string) => {
+    const symbol = ticker.trim().toUpperCase();
+    if (!symbol) return;
+    try {
+      const resp = await fetch("/api/mdg/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add", ticker: symbol }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setSubscriptions(data.tickers || []);
+        addLog(`Subscribed to ticker: ${symbol}`);
+        setNewTickerInput("");
+        if (!selectedTicker) {
+          setSelectedTicker(symbol);
+        }
+      }
+    } catch (err) {
+      addLog(`Failed to add subscription: ${err}`);
+    }
+  };
+
+  const removeSubscription = async (ticker: string) => {
+    try {
+      const resp = await fetch("/api/mdg/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove", ticker }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setSubscriptions(data.tickers || []);
+        addLog(`Unsubscribed from ticker: ${ticker}`);
+        if (selectedTicker === ticker) {
+          setSelectedTicker(data.tickers[0] || "");
+        }
+      }
+    } catch (err) {
+      addLog(`Failed to remove subscription: ${err}`);
+    }
+  };
+
+  const controlMdgStatus = async (action: "pause" | "resume") => {
+    try {
+      const resp = await fetch("/api/mdg/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (resp.ok) {
+        setMdgStatus(action === "pause" ? "PAUSED" : "RUNNING");
+        addLog(`MDG Ingestion state set to: ${action.toUpperCase()}`);
+      }
+    } catch (err) {
+      addLog(`Failed to update MDG status: ${err}`);
+    }
+  };
+
+  const selectVendor = async (vendor: "polygon" | "alpaca") => {
+    try {
+      const resp = await fetch("/api/mdg/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_vendor", vendor }),
+      });
+      if (resp.ok) {
+        setActiveVendor(vendor);
+        addLog(`MDG Vendor switched to: ${vendor.toUpperCase()}`);
+      }
+    } catch (err) {
+      addLog(`Failed to switch vendor: ${err}`);
+    }
+  };
+
+  const executeSimulatedTrade = async (action: "BUY" | "SELL") => {
+    if (!selectedTicker) {
+      addLog("Cannot execute trade: No symbol selected");
+      return;
+    }
+    const ticks = tickData[selectedTicker] || [];
+    if (ticks.length === 0) {
+      addLog(`Cannot execute trade: No price data available for ${selectedTicker}`);
+      return;
+    }
+    const currentPrice = ticks[ticks.length - 1].value;
+    try {
+      const resp = await fetch("/api/mdg/trades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: selectedTicker,
+          price: currentPrice,
+          qty: 100,
+          action: action,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        addLog(`Simulated execution recorded: ${action} 100 ${selectedTicker} @ $${currentPrice}`);
+      }
+    } catch (err) {
+      addLog(`Failed to record simulated execution: ${err}`);
+    }
+  };
+
+  // Lightweight Charts setup
+  useEffect(() => {
+    if (chartContainerRef.current) {
+      try {
+        const chart = createChart(chartContainerRef.current, {
+          width: chartContainerRef.current.clientWidth,
+          height: 380,
+          layout: {
+            background: { color: 'rgba(28, 28, 30, 0.45)' },
+            textColor: '#aeaeb2',
+          },
+          grid: {
+            vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
+            horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
+          },
+          timeScale: {
+            timeVisible: true,
+            secondsVisible: true,
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+          },
+          localization: {
+            timeFormatter: (ts: number) => {
+              const date = new Date(ts * 1000);
+              return date.toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour12: false });
+            }
+          }
+        });
+
+        const lineSeries = chart.addLineSeries({
+          color: '#0a84ff',
+          lineWidth: 2,
+          priceLineVisible: true,
+        });
+
+        chartRef.current = chart;
+        lineSeriesRef.current = lineSeries;
+
+        const handleResize = () => {
+          if (chartContainerRef.current && chartRef.current) {
+            chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
+          }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+          window.removeEventListener('resize', handleResize);
+          chart.remove();
+        };
+      } catch (e) {
+        console.warn("Vite Lightweight charts skipped (jsdom test environment detected):", e);
+      }
+    }
+  }, []);
+
+  // Update line series tick data & execution markers
+  useEffect(() => {
+    if (lineSeriesRef.current && chartRef.current) {
+      const data = tickData[selectedTicker] || [];
+      lineSeriesRef.current.setData(data);
+
+      const symbolTrades = trades.filter(t => t.symbol === selectedTicker);
+      const markers = symbolTrades.map(t => ({
+        time: Math.floor(t.timestamp / 1000),
+        position: (t.action === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+        color: t.action === 'BUY' ? '#30d158' : '#ff453a',
+        shape: (t.action === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
+        text: `${t.action} @ ${t.price}`,
+      }));
+      markers.sort((a, b) => a.time - b.time);
+      lineSeriesRef.current.setMarkers(markers);
+    }
+  }, [selectedTicker, tickData, trades]);
+
+  const jumpChartToTrade = (timestamp: number) => {
+    if (chartRef.current) {
+      const tsSeconds = Math.floor(timestamp / 1000);
+      chartRef.current.timeScale().setVisibleRange({
+        from: tsSeconds - 60,
+        to: tsSeconds + 60,
+      });
+      addLog(`Chart timeline viewport shifted to execution point at ${new Date(timestamp).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}`);
+    }
+  };
+
   const getLogStyle = (line: string): React.CSSProperties => {
     if (line.includes("WARN") || line.includes("WARNING")) {
       return { color: '#ff9f0a', fontWeight: '500' };
@@ -156,7 +427,7 @@ export default function App() {
     if (line.includes("ERROR") || line.includes("failed") || line.includes("exited with code 1")) {
       return { color: '#ff453a', fontWeight: '600' };
     }
-    if (line.includes("successfully") || line.includes("SERVING") || line.includes("connected") || line.includes("active") || line.includes("Replay")) {
+    if (line.includes("successfully") || line.includes("SERVING") || line.includes("connected") || line.includes("active") || line.includes("established")) {
       return { color: '#30d158' };
     }
     return { color: '#aeaeb2' };
@@ -184,6 +455,11 @@ export default function App() {
         .apple-btn:active {
           transform: translateY(0) scale(0.98);
         }
+        .apple-btn:disabled {
+          filter: brightness(0.6);
+          cursor: not-allowed !important;
+          transform: none !important;
+        }
         @keyframes pulse-green {
           0% { box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.4); }
           70% { box-shadow: 0 0 0 6px rgba(48, 209, 88, 0); }
@@ -199,23 +475,15 @@ export default function App() {
           70% { box-shadow: 0 0 0 6px rgba(255, 159, 10, 0); }
           100% { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0); }
         }
-        .pulse-dot-green {
-          animation: pulse-green 2s infinite;
-        }
-        .pulse-dot-red {
-          animation: pulse-red 2s infinite;
-        }
-        .pulse-dot-orange {
-          animation: pulse-orange 2s infinite;
-        }
-        .console-log {
+        .pulse-dot-green { animation: pulse-green 2s infinite; }
+        .pulse-dot-red { animation: pulse-red 2s infinite; }
+        .pulse-dot-orange { animation: pulse-orange 2s infinite; }
+        .scroll-container {
           scrollbar-width: thin;
           scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
         }
-        .console-log::-webkit-scrollbar {
-          width: 6px;
-        }
-        .console-log::-webkit-scrollbar-thumb {
+        .scroll-container::-webkit-scrollbar { width: 6px; }
+        .scroll-container::-webkit-scrollbar-thumb {
           background-color: rgba(255, 255, 255, 0.08);
           border-radius: 3px;
         }
@@ -240,11 +508,156 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Grid */}
+      {/* Section 1: Market Data visualization console */}
+      <section style={{ ...styles.card, marginBottom: '32px' }}>
+        <h2 style={styles.cardTitle}>Market Data Ingestion Console (MDG)</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '32px' }}>
+          
+          {/* Controls Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={styles.ctrlGroup}>
+              <span style={styles.ctrlLabel}>Active Provider Feed:</span>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <button
+                  className="apple-btn"
+                  onClick={() => selectVendor("polygon")}
+                  style={{
+                    ...styles.actionBtn,
+                    backgroundColor: activeVendor === "polygon" ? "#0a84ff" : "rgba(255,255,255,0.05)",
+                    border: activeVendor === "polygon" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  Polygon.io
+                </button>
+                <button
+                  className="apple-btn"
+                  onClick={() => selectVendor("alpaca")}
+                  style={{
+                    ...styles.actionBtn,
+                    backgroundColor: activeVendor === "alpaca" ? "#0a84ff" : "rgba(255,255,255,0.05)",
+                    border: activeVendor === "alpaca" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  Alpaca
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.ctrlGroup}>
+              <span style={styles.ctrlLabel}>Ingestion Status:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                <span className={mdgStatus === "RUNNING" ? "pulse-dot-green" : "pulse-dot-orange"} style={{
+                  width: '10px', height: '10px', borderRadius: '50%', backgroundColor: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a"
+                }} />
+                <span style={{ fontSize: '14px', fontWeight: 600, color: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a" }}>
+                  {mdgStatus}
+                </span>
+                <button
+                  className="apple-btn"
+                  onClick={() => controlMdgStatus(mdgStatus === "RUNNING" ? "pause" : "resume")}
+                  style={{
+                    ...styles.toggleBtn,
+                    marginLeft: 'auto',
+                    backgroundColor: mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.15)" : "rgba(48, 209, 88, 0.15)",
+                    border: `1px solid ${mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.3)" : "rgba(48, 209, 88, 0.3)"}`,
+                    color: mdgStatus === "RUNNING" ? "#ff453a" : "#30d158",
+                  }}
+                >
+                  {mdgStatus === "RUNNING" ? "PAUSE INGEST" : "RESUME INGEST"}
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.ctrlGroup}>
+              <span style={styles.ctrlLabel}>Subscribe Ticker:</span>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <input
+                  type="text"
+                  placeholder="e.g. AAPL"
+                  value={newTickerInput}
+                  onChange={(e) => setNewTickerInput(e.target.value)}
+                  style={styles.textInput}
+                />
+                <button
+                  className="apple-btn"
+                  onClick={() => addSubscription(newTickerInput)}
+                  style={{ ...styles.actionBtn, backgroundColor: '#30d158', width: '80px', color: '#fff' }}
+                >
+                  ADD
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.ctrlGroup}>
+              <span style={styles.ctrlLabel}>Subscriptions ({subscriptions.length}):</span>
+              <div className="scroll-container" style={{ maxHeight: '180px', overflowY: 'auto', marginTop: '6px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '6px' }}>
+                {subscriptions.map(sym => (
+                  <div key={sym} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid rgba(255,255,255,0.03)', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: '13px', color: selectedTicker === sym ? '#0a84ff' : '#fff', cursor: 'pointer' }} onClick={() => setSelectedTicker(sym)}>
+                      {sym} {selectedTicker === sym && "•"}
+                    </span>
+                    <button
+                      className="apple-btn"
+                      onClick={() => removeSubscription(sym)}
+                      style={{ border: 'none', background: 'transparent', color: '#ff453a', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}
+                    >
+                      DELETE
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Chart Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Active Chart:</span>
+                <select
+                  value={selectedTicker}
+                  onChange={(e) => setSelectedTicker(e.target.value)}
+                  style={styles.dropdown}
+                >
+                  <option value="">-- No Symbol --</option>
+                  {subscriptions.map(sym => (
+                    <option key={sym} value={sym}>{sym}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedTicker && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    className="apple-btn"
+                    onClick={() => executeSimulatedTrade("BUY")}
+                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(48, 209, 88, 0.2)', border: '1px solid rgba(48,209,88,0.4)', color: '#30d158', height: '32px', fontSize: '12px' }}
+                  >
+                    🟢 SIMULATE BUY 100
+                  </button>
+                  <button
+                    className="apple-btn"
+                    onClick={() => executeSimulatedTrade("SELL")}
+                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(255, 69, 58, 0.2)', border: '1px solid rgba(255,69,58,0.4)', color: '#ff453a', height: '32px', fontSize: '12px' }}
+                  >
+                    🔴 SIMULATE SELL 100
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Canvas Container */}
+            <div ref={chartContainerRef} style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }} />
+          </div>
+
+        </div>
+      </section>
+
+      {/* Grid: Topology / Controls / Executions */}
       <main style={styles.mainGrid}>
-        {/* Left column: Topology and Command Center */}
+        
+        {/* Left column: Microservices & Circuit command */}
         <section style={styles.leftCol}>
-          {/* Microservices Matrix */}
           <div style={styles.card}>
             <h2 style={styles.cardTitle}>Microservices Health & Topology</h2>
             <div style={styles.matrixContainer}>
@@ -264,7 +677,7 @@ export default function App() {
                     pulseClass = "pulse-dot-green";
                   } else {
                     statusLabel = "INACTIVE (STRATEGY)";
-                    dotColor = "#8e8e93"; // Neutral slate-gray
+                    dotColor = "#8e8e93";
                     pulseClass = "";
                     latencyLabel = "offline";
                   }
@@ -298,7 +711,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Big Red Button Cluster */}
           <div style={styles.card}>
             <h2 style={styles.cardTitle}>Global Circuit Breaker Command Panel</h2>
             <div style={styles.buttonCluster}>
@@ -338,7 +750,6 @@ export default function App() {
                   backgroundColor: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.03)" : "#30d158",
                   color: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.2)" : "#fff",
                   border: circuitState === "RUNNING" ? "1px solid rgba(255, 255, 255, 0.05)" : "none",
-                  cursor: circuitState === "RUNNING" ? "not-allowed" : "pointer",
                   boxShadow: circuitState === "RUNNING" ? "none" : "0 4px 16px rgba(48, 209, 88, 0.3)"
                 }}
               >
@@ -348,12 +759,11 @@ export default function App() {
           </div>
         </section>
 
-        {/* Right column: Dynamic Control Panel */}
+        {/* Right column: Risk limits, strategies, executions tracker */}
         <section style={styles.rightCol}>
           <div style={styles.card}>
             <h2 style={styles.cardTitle}>Dynamic Risk Control & Parameters</h2>
             
-            {/* Wind Control Sliders */}
             <div style={styles.sliderGroup}>
               <div style={styles.sliderLabelRow}>
                 <span>Max Position Limit (Qty)</span>
@@ -396,7 +806,6 @@ export default function App() {
 
             <hr style={styles.divider} />
 
-            {/* Strategy Toggles */}
             <h3 style={styles.subTitle}>Active Strategies Hot-Loading</h3>
             
             <div style={styles.toggleRow}>
@@ -438,38 +847,85 @@ export default function App() {
             </div>
           </div>
 
-          {devMode && (
-            <div style={{ ...styles.card, marginTop: '24px', borderColor: 'rgba(255, 69, 58, 0.3)' }}>
-              <h2 style={{ ...styles.cardTitle, color: '#ff453a', borderBottomColor: 'rgba(255, 69, 58, 0.1)' }}>Developer Modes & Control</h2>
-              <button 
-                className="apple-btn"
-                onClick={async () => {
-                  addLog("Triggering physical platform shutdown API...");
-                  try {
-                    const resp = await fetch("/api/shutdown", { method: "POST" });
-                    if (resp.ok) {
-                      addLog("Shutdown signal accepted by BFF Gateway. Backend exiting...");
-                    } else {
-                      addLog("Failed to trigger shutdown API.");
-                    }
-                  } catch (err) {
-                    addLog(`Shutdown API error: ${err}`);
-                  }
-                }}
-                style={{
-                  ...styles.btn,
-                  backgroundColor: "rgba(255, 69, 58, 0.1)",
-                  border: "1px solid rgba(255, 69, 58, 0.3)",
-                  color: "#ff453a",
-                  width: '100%',
-                }}
-              >
-                🛑 SHUTDOWN ALL SERVICES
-              </button>
+          {/* Trade Executions Table synced to Chart Timeline */}
+          <div style={styles.card}>
+            <h2 style={styles.cardTitle}>Simulated Execution Ledger</h2>
+            <div className="scroll-container" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#8e8e93', textAlign: 'left' }}>
+                    <th style={{ padding: '6px' }}>Time (PST)</th>
+                    <th style={{ padding: '6px' }}>Action</th>
+                    <th style={{ padding: '6px' }}>Symbol</th>
+                    <th style={{ padding: '6px' }}>Price</th>
+                    <th style={{ padding: '6px' }}>Nav</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '12px', color: '#8e8e93' }}>No transactions recorded.</td>
+                    </tr>
+                  ) : (
+                    trades.map((t, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', verticalAlign: 'middle' }}>
+                        <td style={{ padding: '6px' }}>
+                          {new Date(t.timestamp).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                        </td>
+                        <td style={{ padding: '6px', fontWeight: 600, color: t.action === 'BUY' ? '#30d158' : '#ff453a' }}>
+                          {t.action}
+                        </td>
+                        <td style={{ padding: '6px' }}>{t.symbol}</td>
+                        <td style={{ padding: '6px', fontWeight: 500 }}>${t.price}</td>
+                        <td style={{ padding: '6px' }}>
+                          <button
+                            className="apple-btn"
+                            onClick={() => jumpChartToTrade(t.timestamp)}
+                            style={{ ...styles.actionBtn, height: '22px', fontSize: '10px', padding: '0 8px', backgroundColor: 'rgba(10,132,255,0.15)', color: '#0a84ff', border: '1px solid rgba(10,132,255,0.3)' }}
+                          >
+                            Jump
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </section>
       </main>
+
+      {devMode && (
+        <section style={{ ...styles.card, marginBottom: '32px', borderColor: 'rgba(255, 69, 58, 0.3)' }}>
+          <h2 style={{ ...styles.cardTitle, color: '#ff453a', borderBottomColor: 'rgba(255, 69, 58, 0.1)' }}>Developer Modes & Control</h2>
+          <button 
+            className="apple-btn"
+            onClick={async () => {
+              addLog("Triggering physical platform shutdown API...");
+              try {
+                const resp = await fetch("/api/shutdown", { method: "POST" });
+                if (resp.ok) {
+                  addLog("Shutdown signal accepted by BFF Gateway. Backend exiting...");
+                } else {
+                  addLog("Failed to trigger shutdown API.");
+                }
+              } catch (err) {
+                addLog(`Shutdown API error: ${err}`);
+              }
+            }}
+            style={{
+              ...styles.btn,
+              backgroundColor: "rgba(255, 69, 58, 0.1)",
+              border: "1px solid rgba(255, 69, 58, 0.3)",
+              color: "#ff453a",
+              width: '100%',
+            }}
+          >
+            🛑 SHUTDOWN ALL SERVICES
+          </button>
+        </section>
+      )}
 
       {/* Terminal Log Console */}
       <footer style={styles.terminal}>
@@ -477,7 +933,7 @@ export default function App() {
           <span style={styles.terminalTitle}>System Event Terminal Output Log</span>
           {isReconnecting && <span style={styles.reconnectBadge}>Connecting...</span>}
         </div>
-        <div className="console-log" style={styles.terminalConsole}>
+        <div className="console-log scroll-container" style={styles.terminalConsole}>
           {logs.map((log, idx) => (
             <div key={idx} style={{ ...styles.logLine, ...getLogStyle(log) }}>{log}</div>
           ))}
@@ -491,8 +947,8 @@ export default function App() {
 // Inline CSS for Sleek Dark Glassmorphism Aesthetics (Apple Style)
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    backgroundColor: '#000000', // Apple pure black background
-    color: '#f5f5f7', // Apple warm gray text
+    backgroundColor: '#000000',
+    color: '#f5f5f7',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     minHeight: '100vh',
     display: 'flex',
@@ -675,7 +1131,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   slider: {
     width: '100%',
-    accentColor: '#0a84ff', // Apple blue color
+    accentColor: '#0a84ff',
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     height: '4px',
     borderRadius: '2px',
@@ -760,5 +1216,46 @@ const styles: Record<string, React.CSSProperties> = {
   logLine: {
     wordBreak: 'break-all',
     marginBottom: '2px',
+  },
+  ctrlGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  ctrlLabel: {
+    fontSize: '13px',
+    color: '#8e8e93',
+    fontWeight: 500,
+  },
+  textInput: {
+    flexGrow: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '10px',
+    padding: '8px 12px',
+    color: '#fff',
+    fontSize: '13px',
+    outline: 'none',
+  },
+  actionBtn: {
+    padding: '8px 16px',
+    borderRadius: '10px',
+    border: 'none',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdown: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '10px',
+    color: '#fff',
+    padding: '6px 12px',
+    fontSize: '13px',
+    outline: 'none',
+    cursor: 'pointer',
   },
 };

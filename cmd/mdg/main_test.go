@@ -102,7 +102,7 @@ func TestMdgConnectAndIngestSuccess(t *testing.T) {
 	// 2. Queue an EOF to terminate the ingestion loop
 	readChan <- readResult{err: io.EOF}
 
-	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "my-api-key")
+	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "my-api-key", "polygon", []string{"AAPL", "MSFT"})
 	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("Expected EOF or nil error, got %v", err)
 	}
@@ -148,7 +148,7 @@ func TestMdgConnectDialFailure(t *testing.T) {
 	defer cancel()
 
 	mockZmq := &mockZmqSocket{}
-	err := connectAndIngest(ctx, mockZmq, "ws://invalid-address:99999", "")
+	err := connectAndIngest(ctx, mockZmq, "ws://invalid-address:99999", "", "polygon", []string{"AAPL", "MSFT"})
 	if err == nil || !strings.Contains(err.Error(), "dial failed") {
 		t.Fatalf("Expected dial failed error, got: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestMdgAuthFailure(t *testing.T) {
 	defer func() { dialWebSocket = oldDialer }()
 
 	mockZmq := &mockZmqSocket{}
-	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "key")
+	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "key", "polygon", []string{"AAPL", "MSFT"})
 	if err == nil || !strings.Contains(err.Error(), "failed to write auth message") {
 		t.Fatalf("Expected auth write error, got: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMdgRunIngestionLoopCancel(t *testing.T) {
 	cancel() // Cancel immediately
 
 	mockZmq := &mockZmqSocket{}
-	err := runIngestionLoop(ctx, mockZmq, "ws://dummy", "")
+	err := runIngestionLoop(ctx, mockZmq, "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Expected context.Canceled, got %v", err)
 	}
@@ -322,7 +322,7 @@ func TestMdgRunIngestionLoopBackoff(t *testing.T) {
 	// Start runIngestionLoop in a goroutine
 	errChan := make(chan error)
 	go func() {
-		errChan <- runIngestionLoop(ctx, mockZmq, "ws://dummy", "")
+		errChan <- runIngestionLoop(ctx, mockZmq, "")
 	}()
 
 	// Wait 150ms (after the 100ms backoff triggers) then cancel the context
@@ -353,7 +353,7 @@ func TestMdgConnectAndIngestReadError(t *testing.T) {
 	mockZmq := &mockZmqSocket{}
 	readChan <- readResult{err: errors.New("read failed")}
 
-	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "")
+	err := connectAndIngest(ctx, mockZmq, "ws://dummy", "", "polygon", []string{"AAPL", "MSFT"})
 	if err == nil || !strings.Contains(err.Error(), "read error") {
 		t.Fatalf("Expected read error, got: %v", err)
 	}
