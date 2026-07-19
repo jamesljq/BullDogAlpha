@@ -23,7 +23,60 @@ interface TradeMarker {
   timestamp: number; // epoch ms
 }
 
+const checkIsMarketClosed = (): boolean => {
+  try {
+    const nycString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    const nycDate = new Date(nycString);
+    const day = nycDate.getDay(); // 0 = Sunday, 6 = Saturday
+    const hours = nycDate.getHours();
+    const minutes = nycDate.getMinutes();
+
+    if (day === 0 || day === 6) return true;
+
+    const minutesSinceMidnight = hours * 60 + minutes;
+    const marketOpen = 9 * 60 + 30; // 9:30 AM
+    const marketClose = 16 * 60;    // 4:00 PM
+
+    if (minutesSinceMidnight < marketOpen || minutesSinceMidnight >= marketClose) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    const day = new Date().getUTCDay();
+    return day === 0 || day === 6;
+  }
+};
+
+const generateMockHistory = (ticker: string): Array<{ time: number, value: number }> => {
+  const data: Array<{ time: number, value: number }> = [];
+  let basePrice = 150.0;
+  if (ticker === "AAPL") basePrice = 175.0;
+  else if (ticker === "MSFT") basePrice = 330.0;
+  else if (ticker === "TSLA") basePrice = 240.0;
+  else if (ticker === "AMZN") basePrice = 130.0;
+  else if (ticker === "NVDA") basePrice = 450.0;
+  else if (ticker === "GOOG") basePrice = 120.0;
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  for (let i = 100; i > 0; i--) {
+    const time = nowSeconds - i * 5; // 5 seconds interval
+    basePrice += (Math.random() - 0.5) * 0.5;
+    data.push({ time, value: parseFloat(basePrice.toFixed(2)) });
+  }
+  return data;
+};
+
 export default function App() {
+  const [isMarketClosed, setIsMarketClosed] = useState<boolean>(checkIsMarketClosed());
+
+  // Periodically check if market is closed
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIsMarketClosed(checkIsMarketClosed());
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Original states preserved
   const [circuitState, setCircuitState] = useState<"RUNNING" | "PAUSED" | "TERMINATED">("RUNNING");
   const [systemState, setSystemState] = useState<"OK" | "DEGRADED">("OK");
@@ -66,16 +119,24 @@ export default function App() {
     };
   }, []);
 
+  // Pre-populate mock history for a ticker if it has no data
+  useEffect(() => {
+    if (selectedTicker && !tickData[selectedTicker]) {
+      setTickData(prev => {
+        if (prev[selectedTicker]) return prev;
+        return {
+          ...prev,
+          [selectedTicker]: generateMockHistory(selectedTicker)
+        };
+      });
+    }
+  }, [selectedTicker, tickData]);
+
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs((prev) => [...prev.slice(-99), `[${timestamp}] ${msg}`]);
   };
 
-  useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logs]);
 
   const connectWS = () => {
     setIsReconnecting(false);
@@ -645,6 +706,26 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {isMarketClosed && (
+              <div style={{
+                backgroundColor: 'rgba(255, 69, 58, 0.1)',
+                border: '1px solid rgba(255, 69, 58, 0.25)',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                fontSize: '13px',
+                color: '#ff453a',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '4px',
+                backdropFilter: 'blur(10px)',
+                lineHeight: '1.4'
+              }}>
+                <span>⚠️</span>
+                <span>当前正值休市期间（美东时间周一至周五 09:30-16:00 以外），已自动展示历史与模拟行情数据。</span>
+              </div>
+            )}
 
             {/* Canvas Container */}
             <div ref={chartContainerRef} style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }} />
