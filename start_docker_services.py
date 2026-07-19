@@ -125,27 +125,34 @@ class DockerOrchestrator:
         logging.info("SYSTEM: Launching Docker Compose cluster...")
         compose_cmd = ["docker", "compose", "up", "--build"]
 
-        stop_monitor = threading.Event()
+        self.monitor_proc = None
 
         def monitor_bff_shutdown():
-            while not stop_monitor.is_set():
-                time.sleep(2)
-                try:
+            try:
+                # Use docker events to blockingly listen for the 'die' event of bulldog_bff.
+                # This does not require the container to exist beforehand.
+                self.monitor_proc = subprocess.Popen(
+                    ["docker", "events", "--filter", "container=bulldog_bff", "--filter", "event=die"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                line = self.monitor_proc.stdout.readline()
+                if line:
+                    # Container exited. Retrieve its exit code.
                     res = subprocess.run(
-                        ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", "bulldog_bff"],
+                        ["docker", "inspect", "-f", "{{.State.ExitCode}}", "bulldog_bff"],
                         capture_output=True,
                         text=True
                     )
                     if res.returncode == 0:
-                        parts = res.stdout.strip().split()
-                        if len(parts) == 2:
-                            status, exit_code = parts
-                            if status == "exited" and exit_code == "0":
-                                logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
-                                subprocess.run(["docker", "compose", "down"], capture_output=True)
-                                os._exit(exit_success)
-                except Exception:
-                    pass
+                        exit_code = res.stdout.strip()
+                        if exit_code == "0":
+                            logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
+                            subprocess.run(["docker", "compose", "down"], capture_output=True)
+                            os._exit(exit_success)
+            except Exception as e:
+                logging.debug("SYSTEM: BFF shutdown monitor encountered an issue: %s", e)
 
         monitor_thread = threading.Thread(target=monitor_bff_shutdown, daemon=True)
         monitor_thread.start()
@@ -163,7 +170,12 @@ class DockerOrchestrator:
             logging.error("SYSTEM: Docker Compose exited with error: %s", e)
             sys.exit(exit_failure)
         finally:
-            stop_monitor.set()
+            if self.monitor_proc:
+                try:
+                    self.monitor_proc.terminate()
+                    self.monitor_proc.wait(timeout=1)
+                except Exception:
+                    pass
 
 def main(argv):
     del argv  # Unused

@@ -31,7 +31,7 @@ class TestStartDockerServices(unittest.TestCase):
         # 2. Tool missing
         mock_which.side_effect = lambda x: None if x == 'docker' else '/usr/bin/tool'
         orchestrator.check_tool_dependencies()
-        mock_exit.assert_called_with(start_docker_services._EXIT_FAILURE)
+        mock_exit.assert_called_with(1)
 
     @patch('subprocess.run')
     @patch('sys.exit')
@@ -40,7 +40,7 @@ class TestStartDockerServices(unittest.TestCase):
         orchestrator.handle_shutdown(None, None)
         
         mock_run.assert_called_with(["docker", "compose", "down"], check=True)
-        mock_exit.assert_called_once_with(start_docker_services._EXIT_SUCCESS)
+        mock_exit.assert_called_once_with(0)
 
     @patch('subprocess.run')
     @patch('shutil.copy2')
