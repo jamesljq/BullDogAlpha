@@ -27,14 +27,14 @@ flags.DEFINE_boolean(
     "Toggles the developer mode on the BFF Gateway inside Docker Compose."
 )
 flags.DEFINE_string(
-    "polygon_url",
+    "feed_url",
     "ws://bff:8080/polygon",
-    "The WebSocket URL to connect for Polygon.io market data feed."
+    "The WebSocket URL to connect for the market data feed."
 )
 flags.DEFINE_string(
-    "polygon_api_key",
+    "feed_api_key",
     "",
-    "The API Key to authenticate with Polygon.io. Leave empty if using Mock Feed."
+    "The API Key to authenticate with the market data feed. Leave empty if using Mock Feed."
 )
 
 _EXIT_SUCCESS = 0
@@ -144,8 +144,8 @@ class DockerOrchestrator:
         monitor_thread.start()
         
         env = os.environ.copy()
-        env["POLYGON_URL"] = FLAGS.polygon_url
-        env["POLYGON_API_KEY"] = FLAGS.polygon_api_key
+        env["FEED_URL"] = FLAGS.feed_url
+        env["FEED_API_KEY"] = FLAGS.feed_api_key
 
         try:
             # This will block until the user exits or containers exit.
@@ -167,8 +167,8 @@ if __name__ == "__main__":
     # and a local 'local.flags' configuration file exists, load it by default.
     has_explicit_config = any(
         arg.startswith("--flagfile") or 
-        arg.startswith("--polygon_url") or 
-        arg.startswith("--polygon_api_key") 
+        arg.startswith("--feed_url") or 
+        arg.startswith("--feed_api_key") 
         for arg in sys.argv
     )
     if not has_explicit_config:

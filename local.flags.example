@@ -9,15 +9,18 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. Markets Data Gateway (MDG) Configuration
+# 1. Markets Data Feed Configuration
 # ------------------------------------------------------------------------------
 # Mock Feed (Default): ws://bff:8080/polygon
+# Real Alpaca.io IEX Stocks Feed: wss://stream.data.alpaca.markets/v2/iex
 # Real Polygon.io Delayed Stocks Feed: wss://delayed.polygon.io/stocks
-# Real Polygon.io Live Stocks Feed: wss://socket.polygon.io/stocks
---polygon_url=ws://bff:8080/polygon
+--feed_url=ws://bff:8080/polygon
 
 # ------------------------------------------------------------------------------
 # 2. Authentication Keys
 # ------------------------------------------------------------------------------
-# Your personal Polygon.io API Key (leave empty if using Mock Feed)
---polygon_api_key=
+# Your personal Feed API Key
+# - For Alpaca: format as "KEY_ID:SECRET_KEY" (e.g. PKXXXX:XXXXXX)
+# - For Polygon: format as "YOUR_API_KEY"
+# - Leave empty if using Mock Feed
+--feed_api_key=

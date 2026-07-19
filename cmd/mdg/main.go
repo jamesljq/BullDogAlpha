@@ -47,8 +47,8 @@ type WebSocketConn interface {
 }
 
 var (
-	polygonURL = flag.String("polygon-url", "ws://localhost:8080/polygon", "Polygon.io WebSocket connection URL")
-	apiKey     = flag.String("api-key", "", "API key token for Polygon.io authentication")
+	feedURL    = flag.String("feed-url", "ws://localhost:8080/polygon", "Market data feed WebSocket connection URL")
+	apiKey     = flag.String("api-key", "", "API key token for market data feed authentication")
 	zmqAddr    = flag.String("zmq-addr", "tcp://*:5555", "ZeroMQ PUB socket binding address")
 	healthPort = flag.String("health-port", "50053", "gRPC health check server port")
 )
@@ -72,7 +72,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runApp(ctx, *polygonURL, *apiKey, *zmqAddr); err != nil {
+	if err := runApp(ctx, *feedURL, *apiKey, *zmqAddr); err != nil {
 		slog.Error("MDG terminated with fatal error", "error", err)
 		os.Exit(1)
 	}
