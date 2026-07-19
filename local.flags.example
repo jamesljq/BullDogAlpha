@@ -16,6 +16,9 @@
 # Real Polygon.io Delayed Stocks Feed: wss://delayed.polygon.io/stocks
 --feed_url=ws://bff:8080/polygon
 
+# Market Data Feed Vendor (polygon, alpaca)
+--feed_vendor=polygon
+
 # ------------------------------------------------------------------------------
 # 2. Authentication Keys
 # ------------------------------------------------------------------------------

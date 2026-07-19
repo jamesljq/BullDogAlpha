@@ -36,6 +36,12 @@ flags.DEFINE_string(
     "",
     "The API Key to authenticate with the market data feed. Leave empty if using Mock Feed."
 )
+flags.DEFINE_enum(
+    "feed_vendor",
+    "polygon",
+    ["polygon", "alpaca"],
+    "The market data feed vendor/provider."
+)
 
 _EXIT_SUCCESS = 0
 _EXIT_FAILURE = 1
@@ -146,6 +152,7 @@ class DockerOrchestrator:
         env = os.environ.copy()
         env["FEED_URL"] = FLAGS.feed_url
         env["FEED_API_KEY"] = FLAGS.feed_api_key
+        env["FEED_VENDOR"] = FLAGS.feed_vendor
 
         try:
             # This will block until the user exits or containers exit.
@@ -168,7 +175,8 @@ if __name__ == "__main__":
     has_explicit_config = any(
         arg.startswith("--flagfile") or 
         arg.startswith("--feed_url") or 
-        arg.startswith("--feed_api_key") 
+        arg.startswith("--feed_api_key") or
+        arg.startswith("--feed_vendor")
         for arg in sys.argv
     )
     if not has_explicit_config:

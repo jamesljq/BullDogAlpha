@@ -49,6 +49,7 @@ type WebSocketConn interface {
 var (
 	feedURL    = flag.String("feed-url", "ws://localhost:8080/polygon", "Market data feed WebSocket connection URL")
 	apiKey     = flag.String("api-key", "", "API key token for market data feed authentication")
+	feedVendor = flag.String("feed-vendor", "polygon", "Market data feed vendor (polygon, alpaca)")
 	zmqAddr    = flag.String("zmq-addr", "tcp://*:5555", "ZeroMQ PUB socket binding address")
 	healthPort = flag.String("health-port", "50053", "gRPC health check server port")
 )
@@ -172,7 +173,7 @@ func connectAndIngest(ctx context.Context, pubSocket MessageSender, wsURL, key s
 
 	// Optional authentication step if API Key is supplied.
 	if key != "" {
-		isAlpaca := strings.Contains(wsURL, "alpaca.markets")
+		isAlpaca := *feedVendor == "alpaca"
 		var authBytes []byte
 		var err error
 
@@ -287,8 +288,8 @@ func processAndPublish(payload []byte, pubSocket MessageSender) {
 
 	var rawTicks []RawTick
 
-	// Check if the payload is in Alpaca stock trade tick format (tagged with "T":"t")
-	if strings.Contains(string(payload), "\"T\":\"t\"") {
+	// Check if the feed vendor is Alpaca
+	if *feedVendor == "alpaca" {
 		var alpacaTicks []struct {
 			Type      string  `json:"T"`
 			Symbol    string  `json:"S"`
