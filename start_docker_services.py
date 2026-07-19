@@ -43,9 +43,6 @@ flags.DEFINE_enum(
     "The market data feed vendor/provider."
 )
 
-_EXIT_SUCCESS = 0
-_EXIT_FAILURE = 1
-
 class DockerOrchestrator:
     """Manages cross-compilation and Docker Compose execution for the Bulldog Alpha services."""
 
@@ -55,6 +52,7 @@ class DockerOrchestrator:
         signal.signal(signal.SIGTERM, self.handle_shutdown)
 
     def handle_shutdown(self, signum, frame):
+        exit_success = 0
         logging.warning("SYSTEM: Captured shutdown signal. Stopping Docker Compose services...")
         try:
             # Run docker compose down to stop and remove all containers
@@ -62,15 +60,18 @@ class DockerOrchestrator:
             logging.info("SYSTEM: Docker Compose services stopped and cleaned up.")
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Failed to clean up Docker Compose services: %s", e)
-        sys.exit(_EXIT_SUCCESS)
+        sys.exit(exit_success)
 
     def check_tool_dependencies(self):
+        exit_failure = 1
         for tool in ["bazel", "docker"]:
             if not shutil.which(tool):
                 logging.error("SYSTEM: Required tool '%s' is not installed or not in PATH.", tool)
-                sys.exit(_EXIT_FAILURE)
+                sys.exit(exit_failure)
 
     def run(self):
+        exit_success = 0
+        exit_failure = 1
         self.check_tool_dependencies()
 
         workspace_dir = FLAGS.workspace_dir
@@ -100,7 +101,7 @@ class DockerOrchestrator:
             logging.info("SYSTEM: Bazel build completed successfully.")
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Bazel cross-compilation failed: %s", e)
-            sys.exit(_EXIT_FAILURE)
+            sys.exit(exit_failure)
 
         # 3. Re-create local bin directory and stage binaries
         bin_dir = os.path.join(workspace_dir, "bin")
@@ -118,7 +119,7 @@ class DockerOrchestrator:
                 shutil.copy2(src_path, dst_path)
             except Exception as e:
                 logging.error("SYSTEM: Failed to stage binary for %s: %s", svc, e)
-                sys.exit(_EXIT_FAILURE)
+                sys.exit(exit_failure)
 
         # 4. Launch Docker Compose up
         logging.info("SYSTEM: Launching Docker Compose cluster...")
@@ -142,7 +143,7 @@ class DockerOrchestrator:
                             if status == "exited" and exit_code == "0":
                                 logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
                                 subprocess.run(["docker", "compose", "down"], capture_output=True)
-                                os._exit(_EXIT_SUCCESS)
+                                os._exit(exit_success)
                 except Exception:
                     pass
 
@@ -160,7 +161,7 @@ class DockerOrchestrator:
             subprocess.run(compose_cmd, check=True, env=env)
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Docker Compose exited with error: %s", e)
-            sys.exit(_EXIT_FAILURE)
+            sys.exit(exit_failure)
         finally:
             stop_monitor.set()
 
@@ -185,5 +186,5 @@ if __name__ == "__main__":
         local_flags_path = os.path.join(workspace_dir, "local.flags")
         if os.path.exists(local_flags_path):
             sys.argv.append(f"--flagfile={local_flags_path}")
-            
+
     app.run(main)
