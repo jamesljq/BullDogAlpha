@@ -1,0 +1,29 @@
+# ==============================================================================
+# Bulldog Alpha - ABSL Flags Configuration File
+# ==============================================================================
+# Copy this file to 'local.flags' and modify settings for local execution:
+#   cp local.flags.example local.flags
+#
+# Pass this flagfile when running the orchestrator via Bazel:
+#   bazel run :start_docker_services -- --flagfile=local.flags
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Markets Data Feed Configuration
+# ------------------------------------------------------------------------------
+# Mock Feed (Default): ws://bff:8080/polygon
+# Real Alpaca.io IEX Stocks Feed: wss://stream.data.alpaca.markets/v2/iex
+# Real Polygon.io Delayed Stocks Feed: wss://delayed.polygon.io/stocks
+--feed_url=ws://bff:8080/polygon
+
+# Market Data Feed Vendor (polygon, alpaca)
+--feed_vendor=polygon
+
+# ------------------------------------------------------------------------------
+# 2. Authentication Keys
+# ------------------------------------------------------------------------------
+# Your personal Feed API Key
+# - For Alpaca: format as "KEY_ID:SECRET_KEY" (e.g. PKXXXX:XXXXXX)
+# - For Polygon: format as "YOUR_API_KEY"
+# - Leave empty if using Mock Feed
+--feed_api_key=

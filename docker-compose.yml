@@ -37,7 +37,10 @@ services:
       args:
         SERVICE_NAME: mdg
     container_name: bulldog_mdg
-    command: ["--polygon-url=ws://bff:8080/polygon"]
+    command: [
+      "--feed-url=${FEED_URL:-ws://bff:8080/polygon}",
+      "--api-key=${FEED_API_KEY:-}"
+    ]
     ports:
       - "50053:50053"
     depends_on:

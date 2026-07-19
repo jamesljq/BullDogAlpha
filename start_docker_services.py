@@ -26,9 +26,22 @@ flags.DEFINE_boolean(
     True,
     "Toggles the developer mode on the BFF Gateway inside Docker Compose."
 )
-
-_EXIT_SUCCESS = 0
-_EXIT_FAILURE = 1
+flags.DEFINE_string(
+    "feed_url",
+    "ws://bff:8080/polygon",
+    "The WebSocket URL to connect for the market data feed."
+)
+flags.DEFINE_string(
+    "feed_api_key",
+    "",
+    "The API Key to authenticate with the market data feed. Leave empty if using Mock Feed."
+)
+flags.DEFINE_enum(
+    "feed_vendor",
+    "polygon",
+    ["polygon", "alpaca"],
+    "The market data feed vendor/provider."
+)
 
 class DockerOrchestrator:
     """Manages cross-compilation and Docker Compose execution for the Bulldog Alpha services."""
@@ -39,6 +52,7 @@ class DockerOrchestrator:
         signal.signal(signal.SIGTERM, self.handle_shutdown)
 
     def handle_shutdown(self, signum, frame):
+        exit_success = 0
         logging.warning("SYSTEM: Captured shutdown signal. Stopping Docker Compose services...")
         try:
             # Run docker compose down to stop and remove all containers
@@ -46,15 +60,18 @@ class DockerOrchestrator:
             logging.info("SYSTEM: Docker Compose services stopped and cleaned up.")
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Failed to clean up Docker Compose services: %s", e)
-        sys.exit(_EXIT_SUCCESS)
+        sys.exit(exit_success)
 
     def check_tool_dependencies(self):
+        exit_failure = 1
         for tool in ["bazel", "docker"]:
             if not shutil.which(tool):
                 logging.error("SYSTEM: Required tool '%s' is not installed or not in PATH.", tool)
-                sys.exit(_EXIT_FAILURE)
+                sys.exit(exit_failure)
 
     def run(self):
+        exit_success = 0
+        exit_failure = 1
         self.check_tool_dependencies()
 
         workspace_dir = FLAGS.workspace_dir
@@ -84,7 +101,7 @@ class DockerOrchestrator:
             logging.info("SYSTEM: Bazel build completed successfully.")
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Bazel cross-compilation failed: %s", e)
-            sys.exit(_EXIT_FAILURE)
+            sys.exit(exit_failure)
 
         # 3. Re-create local bin directory and stage binaries
         bin_dir = os.path.join(workspace_dir, "bin")
@@ -102,46 +119,63 @@ class DockerOrchestrator:
                 shutil.copy2(src_path, dst_path)
             except Exception as e:
                 logging.error("SYSTEM: Failed to stage binary for %s: %s", svc, e)
-                sys.exit(_EXIT_FAILURE)
+                sys.exit(exit_failure)
 
         # 4. Launch Docker Compose up
         logging.info("SYSTEM: Launching Docker Compose cluster...")
         compose_cmd = ["docker", "compose", "up", "--build"]
 
-        stop_monitor = threading.Event()
+        self.monitor_proc = None
 
         def monitor_bff_shutdown():
-            while not stop_monitor.is_set():
-                time.sleep(2)
-                try:
+            try:
+                # Use docker events to blockingly listen for the 'die' event of bulldog_bff.
+                # This does not require the container to exist beforehand.
+                self.monitor_proc = subprocess.Popen(
+                    ["docker", "events", "--filter", "container=bulldog_bff", "--filter", "event=die"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                line = self.monitor_proc.stdout.readline()
+                if line:
+                    # Container exited. Retrieve its exit code.
                     res = subprocess.run(
-                        ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", "bulldog_bff"],
+                        ["docker", "inspect", "-f", "{{.State.ExitCode}}", "bulldog_bff"],
                         capture_output=True,
                         text=True
                     )
                     if res.returncode == 0:
-                        parts = res.stdout.strip().split()
-                        if len(parts) == 2:
-                            status, exit_code = parts
-                            if status == "exited" and exit_code == "0":
-                                logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
-                                subprocess.run(["docker", "compose", "down"], capture_output=True)
-                                os._exit(_EXIT_SUCCESS)
-                except Exception:
-                    pass
+                        exit_code = res.stdout.strip()
+                        if exit_code == "0":
+                            logging.info("SYSTEM: BFF container exited gracefully via developer shutdown trigger. Initiating full clean shutdown...")
+                            subprocess.run(["docker", "compose", "down"], capture_output=True)
+                            os._exit(exit_success)
+            except Exception as e:
+                logging.debug("SYSTEM: BFF shutdown monitor encountered an issue: %s", e)
 
         monitor_thread = threading.Thread(target=monitor_bff_shutdown, daemon=True)
         monitor_thread.start()
         
+        env = os.environ.copy()
+        env["FEED_URL"] = FLAGS.feed_url
+        env["FEED_API_KEY"] = FLAGS.feed_api_key
+        env["FEED_VENDOR"] = FLAGS.feed_vendor
+
         try:
             # This will block until the user exits or containers exit.
             # When Ctrl+C is pressed, the signal handler handle_shutdown will trigger.
-            subprocess.run(compose_cmd, check=True)
+            subprocess.run(compose_cmd, check=True, env=env)
         except subprocess.CalledProcessError as e:
             logging.error("SYSTEM: Docker Compose exited with error: %s", e)
-            sys.exit(_EXIT_FAILURE)
+            sys.exit(exit_failure)
         finally:
-            stop_monitor.set()
+            if self.monitor_proc:
+                try:
+                    self.monitor_proc.terminate()
+                    self.monitor_proc.wait(timeout=1)
+                except Exception:
+                    pass
 
 def main(argv):
     del argv  # Unused
@@ -149,4 +183,20 @@ def main(argv):
     orchestrator.run()
 
 if __name__ == "__main__":
+    # If the user did not explicitly supply a flagfile or manual polygon parameters,
+    # and a local 'local.flags' configuration file exists, load it by default.
+    has_explicit_config = any(
+        arg.startswith("--flagfile") or 
+        arg.startswith("--feed_url") or 
+        arg.startswith("--feed_api_key") or
+        arg.startswith("--feed_vendor")
+        for arg in sys.argv
+    )
+    if not has_explicit_config:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        workspace_dir = os.environ.get("BUILD_WORKSPACE_DIRECTORY", script_dir)
+        local_flags_path = os.path.join(workspace_dir, "local.flags")
+        if os.path.exists(local_flags_path):
+            sys.argv.append(f"--flagfile={local_flags_path}")
+
     app.run(main)
