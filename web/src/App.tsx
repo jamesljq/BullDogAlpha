@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createChart, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+import { createChart, LineSeries, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
 
 // Types matching the Go BFF JSON messages
 interface HealthStatus {
@@ -47,7 +47,25 @@ const checkIsMarketClosed = (): boolean => {
   }
 };
 
-const generateMockHistory = (ticker: string): Array<{ time: number, value: number }> => {
+interface GranularityOption {
+  label: string;
+  value: string;
+  seconds: number;
+}
+
+const GRANULARITIES: GranularityOption[] = [
+  { label: '1 Minute', value: '1m', seconds: 60 },
+  { label: '1 Hour', value: '1h', seconds: 3600 },
+  { label: '1 Day', value: '1d', seconds: 86400 },
+  { label: '1 Week', value: '1w', seconds: 604800 },
+  { label: '1 Month', value: '1M', seconds: 2592000 },
+  { label: '6 Months', value: '6M', seconds: 15552000 },
+  { label: '1 Year', value: '1y', seconds: 31104000 },
+  { label: '3 Years', value: '3y', seconds: 93312000 },
+  { label: '5 Years', value: '5y', seconds: 155520000 },
+];
+
+const generateMockHistory = (ticker: string, intervalSeconds: number): Array<{ time: number, value: number }> => {
   const data: Array<{ time: number, value: number }> = [];
   let basePrice = 150.0;
   if (ticker === "AAPL") basePrice = 175.0;
@@ -58,13 +76,46 @@ const generateMockHistory = (ticker: string): Array<{ time: number, value: numbe
   else if (ticker === "GOOG") basePrice = 120.0;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
-  for (let i = 100; i > 0; i--) {
-    const time = nowSeconds - i * 5; // 5 seconds interval
-    basePrice += (Math.random() - 0.5) * 0.5;
+  const count = 100;
+  for (let i = count; i > 0; i--) {
+    const time = nowSeconds - i * intervalSeconds;
+    basePrice += (Math.random() - 0.5) * (basePrice * 0.005);
     data.push({ time, value: parseFloat(basePrice.toFixed(2)) });
   }
   return data;
 };
+
+const generateMockCandles = (ticker: string, intervalSeconds: number): Array<{ time: number, open: number, high: number, low: number, close: number }> => {
+  const data: Array<{ time: number, open: number, high: number, low: number, close: number }> = [];
+  let basePrice = 150.0;
+  if (ticker === "AAPL") basePrice = 175.0;
+  else if (ticker === "MSFT") basePrice = 330.0;
+  else if (ticker === "TSLA") basePrice = 240.0;
+  else if (ticker === "AMZN") basePrice = 130.0;
+  else if (ticker === "NVDA") basePrice = 450.0;
+  else if (ticker === "GOOG") basePrice = 120.0;
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const count = 100;
+  for (let i = count; i > 0; i--) {
+    const time = nowSeconds - i * intervalSeconds;
+    const open = basePrice + (Math.random() - 0.5) * (basePrice * 0.01);
+    const close = open + (Math.random() - 0.5) * (basePrice * 0.01);
+    const high = Math.max(open, close) + Math.random() * (basePrice * 0.005);
+    const low = Math.min(open, close) - Math.random() * (basePrice * 0.005);
+    
+    basePrice = close;
+    data.push({
+      time,
+      open: parseFloat(open.toFixed(2)),
+      high: parseFloat(high.toFixed(2)),
+      low: parseFloat(low.toFixed(2)),
+      close: parseFloat(close.toFixed(2))
+    });
+  }
+  return data;
+};
+
 
 export default function App() {
   const [isMarketClosed, setIsMarketClosed] = useState<boolean>(checkIsMarketClosed());
@@ -101,13 +152,17 @@ export default function App() {
   const [selectedTicker, setSelectedTicker] = useState<string>("");
   const [newTickerInput, setNewTickerInput] = useState<string>("");
   const [tickData, setTickData] = useState<Record<string, Array<{ time: number, value: number }>>>({});
+  const [candleData, setCandleData] = useState<Record<string, Array<{ time: number, open: number, high: number, low: number, close: number }>>>({});
   const [trades, setTrades] = useState<TradeMarker[]>([]);
+
+  const [chartType, setChartType] = useState<"line" | "candlestick">("line");
+  const [selectedGranularity, setSelectedGranularity] = useState<string>("1m");
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
-  const [lineSeries, setLineSeries] = useState<any>(null);
+  const [activeSeries, setActiveSeries] = useState<any>(null);
   const seriesMarkersRef = useRef<any>(null);
 
   // Connect to Go BFF WebSocket
@@ -119,19 +174,39 @@ export default function App() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
-
+  // Auto-select first subscription as active chart
+  useEffect(() => {
+    if (subscriptions.length > 0 && !selectedTicker) {
+      setSelectedTicker(subscriptions[0]);
+    }
+  }, [subscriptions, selectedTicker]);
   // Pre-populate mock history for a ticker if it has no data
   useEffect(() => {
-    if (selectedTicker && !tickData[selectedTicker]) {
-      setTickData(prev => {
-        if (prev[selectedTicker]) return prev;
-        return {
-          ...prev,
-          [selectedTicker]: generateMockHistory(selectedTicker)
-        };
-      });
+    if (selectedTicker) {
+      const key = `${selectedTicker}_${selectedGranularity}`;
+      const granularitySec = GRANULARITIES.find(g => g.value === selectedGranularity)?.seconds || 60;
+      
+      if (!tickData[key]) {
+        setTickData(prev => {
+          if (prev[key]) return prev;
+          return {
+            ...prev,
+            [key]: generateMockHistory(selectedTicker, granularitySec)
+          };
+        });
+      }
+      
+      if (!candleData[key]) {
+        setCandleData(prev => {
+          if (prev[key]) return prev;
+          return {
+            ...prev,
+            [key]: generateMockCandles(selectedTicker, granularitySec)
+          };
+        });
+      }
     }
-  }, [selectedTicker, tickData]);
+  }, [selectedTicker, selectedGranularity, tickData, candleData]);
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -173,13 +248,15 @@ export default function App() {
         } else if (data.type === "tick" && data.tick) {
           const t = data.tick;
           const tickTime = Math.floor(t.t / 1000);
+          const key = `${t.sym}_${selectedGranularity}`;
+          const granularitySec = GRANULARITIES.find(g => g.value === selectedGranularity)?.seconds || 60;
           
           setTickData(prev => {
-            const currentTicks = prev[t.sym] || [];
+            const currentTicks = prev[key] || [];
             const lastTick = currentTicks[currentTicks.length - 1];
             
             let newTicks;
-            if (lastTick && lastTick.time === tickTime) {
+            if (lastTick && Math.floor(lastTick.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
               lastTick.value = t.p;
               newTicks = [...currentTicks];
             } else {
@@ -192,7 +269,31 @@ export default function App() {
             
             return {
               ...prev,
-              [t.sym]: newTicks
+              [key]: newTicks
+            };
+          });
+
+          setCandleData(prev => {
+            const currentCandles = prev[key] || [];
+            const lastCandle = currentCandles[currentCandles.length - 1];
+            
+            let newCandles;
+            if (lastCandle && Math.floor(lastCandle.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
+              lastCandle.close = t.p;
+              if (t.p > lastCandle.high) lastCandle.high = t.p;
+              if (t.p < lastCandle.low) lastCandle.low = t.p;
+              newCandles = [...currentCandles];
+            } else {
+              newCandles = [...currentCandles, { time: tickTime, open: t.p, high: t.p, low: t.p, close: t.p }];
+            }
+            
+            if (newCandles.length > 500) {
+              newCandles = newCandles.slice(-500);
+            }
+            
+            return {
+              ...prev,
+              [key]: newCandles
             };
           });
         } else if (data.type === "trade_execution" && data.trade) {
@@ -372,12 +473,20 @@ export default function App() {
       addLog("Cannot execute trade: No symbol selected");
       return;
     }
-    const ticks = tickData[selectedTicker] || [];
-    if (ticks.length === 0) {
+    const key = `${selectedTicker}_${selectedGranularity}`;
+    const ticks = tickData[key] || [];
+    const candles = candleData[key] || [];
+    
+    if (chartType === "line" && ticks.length === 0) {
       addLog(`Cannot execute trade: No price data available for ${selectedTicker}`);
       return;
     }
-    const currentPrice = ticks[ticks.length - 1].value;
+    if (chartType === "candlestick" && candles.length === 0) {
+      addLog(`Cannot execute trade: No price data available for ${selectedTicker}`);
+      return;
+    }
+
+    const currentPrice = chartType === "line" ? ticks[ticks.length - 1].value : candles[candles.length - 1].close;
     try {
       const resp = await fetch("/api/mdg/trades", {
         method: "POST",
@@ -426,15 +535,25 @@ export default function App() {
           }
         });
 
-        const lineSeries = chart.addSeries(LineSeries, {
-          color: '#0a84ff',
-          lineWidth: 2,
-          priceLineVisible: true,
-        });
+        let series;
+        if (chartType === "line") {
+          series = chart.addSeries(LineSeries, {
+            color: '#0a84ff',
+            lineWidth: 2,
+            priceLineVisible: true,
+          });
+        } else {
+          series = chart.addSeries(CandlestickSeries, {
+            upColor: '#30d158',
+            downColor: '#ff453a',
+            borderVisible: false,
+            wickVisible: true,
+          });
+        }
 
         chartRef.current = chart;
-        setLineSeries(lineSeries);
-        seriesMarkersRef.current = createSeriesMarkers(lineSeries, []);
+        setActiveSeries(series);
+        seriesMarkersRef.current = createSeriesMarkers(series, []);
 
         const handleResize = () => {
           if (chartContainerRef.current && chartRef.current) {
@@ -451,13 +570,25 @@ export default function App() {
         console.warn("Vite Lightweight charts skipped (jsdom test environment detected):", e);
       }
     }
-  }, []);
+  }, [chartType]);
 
-  // Update line series tick data & execution markers
+  // Update active series tick/candle data & execution markers
   useEffect(() => {
-    if (lineSeries && chartRef.current) {
-      const data = tickData[selectedTicker] || [];
-      lineSeries.setData(data);
+    if (activeSeries && chartRef.current) {
+      const key = `${selectedTicker}_${selectedGranularity}`;
+      const currentSeriesType = typeof activeSeries.seriesType === "function" ? activeSeries.seriesType() : null;
+      if (currentSeriesType) {
+        if (chartType === "line" && currentSeriesType !== "Line") return;
+        if (chartType === "candlestick" && currentSeriesType !== "Candlestick") return;
+      }
+
+      if (chartType === "line") {
+        const data = tickData[key] || [];
+        activeSeries.setData(data);
+      } else {
+        const data = candleData[key] || [];
+        activeSeries.setData(data);
+      }
 
       const symbolTrades = trades.filter(t => t.symbol === selectedTicker);
       const markers = symbolTrades.map(t => ({
@@ -472,7 +603,7 @@ export default function App() {
         seriesMarkersRef.current.setMarkers(markers);
       }
     }
-  }, [selectedTicker, tickData, trades, lineSeries]);
+  }, [selectedTicker, selectedGranularity, tickData, candleData, trades, activeSeries, chartType]);
 
   const jumpChartToTrade = (timestamp: number) => {
     if (chartRef.current) {
@@ -677,18 +808,45 @@ export default function App() {
           {/* Chart Column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Active Chart:</span>
-                <select
-                  value={selectedTicker}
-                  onChange={(e) => setSelectedTicker(e.target.value)}
-                  style={styles.dropdown}
-                >
-                  <option value="">-- No Symbol --</option>
-                  {subscriptions.map(sym => (
-                    <option key={sym} value={sym}>{sym}</option>
-                  ))}
-                </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Active Chart:</span>
+                  <select
+                    value={selectedTicker}
+                    onChange={(e) => setSelectedTicker(e.target.value)}
+                    style={styles.dropdown}
+                  >
+                    <option value="">-- No Symbol --</option>
+                    {subscriptions.map(sym => (
+                      <option key={sym} value={sym}>{sym}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Type:</span>
+                  <select
+                    value={chartType}
+                    onChange={(e) => setChartType(e.target.value as "line" | "candlestick")}
+                    style={styles.dropdown}
+                  >
+                    <option value="line">Line</option>
+                    <option value="candlestick">Candlestick</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Granularity:</span>
+                  <select
+                    value={selectedGranularity}
+                    onChange={(e) => setSelectedGranularity(e.target.value)}
+                    style={styles.dropdown}
+                  >
+                    {GRANULARITIES.map(g => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {selectedTicker && (
