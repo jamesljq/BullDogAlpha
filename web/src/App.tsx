@@ -107,7 +107,7 @@ export default function App() {
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
-  const lineSeriesRef = useRef<any>(null);
+  const [lineSeries, setLineSeries] = useState<any>(null);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -432,7 +432,7 @@ export default function App() {
         });
 
         chartRef.current = chart;
-        lineSeriesRef.current = lineSeries;
+        setLineSeries(lineSeries);
 
         const handleResize = () => {
           if (chartContainerRef.current && chartRef.current) {
@@ -453,9 +453,9 @@ export default function App() {
 
   // Update line series tick data & execution markers
   useEffect(() => {
-    if (lineSeriesRef.current && chartRef.current) {
+    if (lineSeries && chartRef.current) {
       const data = tickData[selectedTicker] || [];
-      lineSeriesRef.current.setData(data);
+      lineSeries.setData(data);
 
       const symbolTrades = trades.filter(t => t.symbol === selectedTicker);
       const markers = symbolTrades.map(t => ({
@@ -466,9 +466,9 @@ export default function App() {
         text: `${t.action} @ ${t.price}`,
       }));
       markers.sort((a, b) => a.time - b.time);
-      lineSeriesRef.current.setMarkers(markers);
+      lineSeries.setMarkers(markers);
     }
-  }, [selectedTicker, tickData, trades]);
+  }, [selectedTicker, tickData, trades, lineSeries]);
 
   const jumpChartToTrade = (timestamp: number) => {
     if (chartRef.current) {
@@ -723,7 +723,7 @@ export default function App() {
                 lineHeight: '1.4'
               }}>
                 <span>⚠️</span>
-                <span>当前正值休市期间（美东时间周一至周五 09:30-16:00 以外），已自动展示历史与模拟行情数据。</span>
+                <span>The market is currently closed. Displaying historical / mock data.</span>
               </div>
             )}
 
