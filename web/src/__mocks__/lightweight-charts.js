@@ -1,10 +1,14 @@
 module.exports = {
+  __esModule: true,
   createChart: () => ({
-    addLineSeries: () => ({
+    addSeries: () => ({
       setData: () => {},
-      setMarkers: () => {},
     }),
     applyOptions: () => {},
     remove: () => {},
+  }),
+  LineSeries: {},
+  createSeriesMarkers: () => ({
+    setMarkers: () => {},
   }),
 };

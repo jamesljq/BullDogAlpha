@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createChart } from 'lightweight-charts';
+import { createChart, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 
 // Types matching the Go BFF JSON messages
 interface HealthStatus {
@@ -108,6 +108,7 @@ export default function App() {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
   const [lineSeries, setLineSeries] = useState<any>(null);
+  const seriesMarkersRef = useRef<any>(null);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -425,7 +426,7 @@ export default function App() {
           }
         });
 
-        const lineSeries = chart.addLineSeries({
+        const lineSeries = chart.addSeries(LineSeries, {
           color: '#0a84ff',
           lineWidth: 2,
           priceLineVisible: true,
@@ -433,6 +434,7 @@ export default function App() {
 
         chartRef.current = chart;
         setLineSeries(lineSeries);
+        seriesMarkersRef.current = createSeriesMarkers(lineSeries, []);
 
         const handleResize = () => {
           if (chartContainerRef.current && chartRef.current) {
@@ -466,7 +468,9 @@ export default function App() {
         text: `${t.action} @ ${t.price}`,
       }));
       markers.sort((a, b) => a.time - b.time);
-      lineSeries.setMarkers(markers);
+      if (seriesMarkersRef.current) {
+        seriesMarkersRef.current.setMarkers(markers);
+      }
     }
   }, [selectedTicker, tickData, trades, lineSeries]);
 
