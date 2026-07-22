@@ -824,4 +824,57 @@ describe('Bulldog Alpha Web Console', () => {
     // Incremental trade/tick update MUST NOT trigger fitContent again, preserving user zoom!
     expect(mockFitContent.mock.calls.length).toBe(initialCallCount);
   });
+
+  test('Watchlist pre-fetches 1d historical market bars for all subscribed tickers', async () => {
+    const fetchMock = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            is_mock: false,
+            source: 'alpaca',
+            bars: [{ time: 1000, open: 600.0, high: 630.0, low: 590.0, close: 622.77 }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL', 'META'] }),
+      });
+    });
+    (global as any).fetch = fetchMock;
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      // Verify that fetch was called for both AAPL and META 1d history
+      const urls = fetchMock.mock.calls.map((c: any) => c[0]);
+      expect(urls.some((u: string) => u.includes('ticker=META'))).toBe(true);
+      expect(urls.some((u: string) => u.includes('ticker=AAPL'))).toBe(true);
+    });
+  });
+
+  test('Watchlist displays loading placeholder --.-- instead of hardcoded $150.00 mock price when real live data is loading', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        // Pending promise (simulating network latency)
+        return new Promise(() => {});
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL', 'UNKNOWN_STOCK'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // In Real Live Data mode while data is loading, UNKNOWN_STOCK must NOT render hardcoded $150.00
+    expect(screen.queryByText('$150.00')).not.toBeInTheDocument();
+    expect(screen.getAllByText('--.--').length).toBeGreaterThan(0);
+  });
 });
