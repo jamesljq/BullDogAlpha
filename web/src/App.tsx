@@ -473,6 +473,8 @@ export default function App() {
   const [tickData, setTickData] = useState<Record<string, Array<{ time: number, value: number }>>>({});
   const [candleData, setCandleData] = useState<Record<string, Array<{ time: number, open: number, high: number, low: number, close: number }>>>({});
   const [trades, setTrades] = useState<TradeMarker[]>([]);
+  const [dataSourceInfo, setDataSourceInfo] = useState<{ isMock: boolean; source: string }>({ isMock: false, source: "polygon" });
+  const [forceMockMode, setForceMockMode] = useState<boolean>(false);
 
   const [chartType, setChartType] = useState<"line" | "candlestick">("candlestick");
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
@@ -538,7 +540,8 @@ export default function App() {
   // Load real historical data from BFF
   const fetchHistoricalData = async (ticker: string, granularity: string, interval: string) => {
     try {
-      const resp = await fetch(`/api/mdg/history?ticker=${ticker}&granularity=${granularity}&interval=${interval}`);
+      const modeParam = forceMockMode ? "&mode=mock" : "";
+      const resp = await fetch(`/api/mdg/history?ticker=${ticker}&granularity=${granularity}&interval=${interval}${modeParam}`);
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && data.bars && data.bars.length > 0) {
@@ -554,15 +557,24 @@ export default function App() {
 
           setTickData(prev => ({ ...prev, [key]: lineBars }));
           setCandleData(prev => ({ ...prev, [key]: candleBars }));
-          addLog(`Loaded real historical bars for ${ticker} (${granularity}, ${interval})`);
+
+          const isMock = data.is_mock ?? (data.source === "mock");
+          const sourceName = data.source || (isMock ? "mock" : activeVendor);
+          setDataSourceInfo({ isMock: !!isMock, source: sourceName });
+
+          if (isMock) {
+            addLog(`Loaded simulated mock historical bars for ${ticker} (${granularity}, ${interval})`);
+          } else {
+            addLog(`Loaded REAL live market bars for ${ticker} via ${sourceName.toUpperCase()}`);
+          }
           return;
         }
       }
     } catch (e) {
-      console.warn("Failed to fetch real historical data:", e);
+      console.warn("Failed to fetch historical data:", e);
     }
     
-    // Fallback to high-fidelity mock if no key or API fails
+    // Fallback to high-fidelity mock if offline or failed
     const key = `${ticker}_${granularity}`;
     const granularitySec = GRANULARITIES.find(g => g.value === granularity)?.seconds || 60;
     
@@ -572,13 +584,14 @@ export default function App() {
     setCandleData(prev => {
       return { ...prev, [key]: generateMockCandles(ticker, granularitySec) };
     });
+    setDataSourceInfo({ isMock: true, source: "mock" });
   };
 
   useEffect(() => {
     if (selectedTicker) {
       fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
     }
-  }, [selectedTicker, selectedGranularity, selectedInterval]);
+  }, [selectedTicker, selectedGranularity, selectedInterval, forceMockMode]);
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -1204,6 +1217,37 @@ export default function App() {
                       }}>
                         {marketInfo.label}
                       </span>
+                      {dataSourceInfo.isMock ? (
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '3px 9px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(255, 159, 10, 0.15)',
+                          color: '#ff9f0a',
+                          border: '1px solid rgba(255, 159, 10, 0.35)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }} title="Currently displaying simulated mock bars. Configure Polygon/Alpaca API keys in Admin tab for live feeds.">
+                          <span>⚠️ MOCK DATA MODE</span>
+                        </span>
+                      ) : (
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '3px 9px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(48, 209, 88, 0.15)',
+                          color: '#30d158',
+                          border: '1px solid rgba(48, 209, 88, 0.35)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
+                          <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1265,6 +1309,22 @@ export default function App() {
                       {periodInfo.label}
                     </span>
                   </div>
+                  {dataSourceInfo.isMock && (
+                    <div style={{
+                      backgroundColor: 'rgba(255, 159, 10, 0.1)',
+                      border: '1px solid rgba(255, 159, 10, 0.25)',
+                      borderRadius: '8px',
+                      padding: '10px 14px',
+                      color: '#ff9f0a',
+                      fontSize: '13px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginTop: '12px',
+                    }}>
+                      <span>⚠️ <strong>DEV / MOCK DATA MODE ACTIVE:</strong> Currently displaying simulated pricing bars because no live market API key is set or Mock Mode is explicitly enabled. Configure your Polygon.io or Alpaca API key in the Admin tab for real-time market data.</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1440,6 +1500,42 @@ export default function App() {
               
               {/* Controls Column */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={styles.ctrlGroup}>
+                  <span style={styles.ctrlLabel}>Data Source Engine Mode:</span>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                    <button
+                      className="apple-btn"
+                      onClick={() => {
+                        setForceMockMode(false);
+                        addLog("Data source engine set to: REAL LIVE MARKET FEED");
+                      }}
+                      style={{
+                        ...styles.actionBtn,
+                        backgroundColor: !forceMockMode ? "#30d158" : "rgba(255,255,255,0.05)",
+                        color: !forceMockMode ? "#ffffff" : "#aeaeb2",
+                        border: !forceMockMode ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      ⚡ Real Market Feed
+                    </button>
+                    <button
+                      className="apple-btn"
+                      onClick={() => {
+                        setForceMockMode(true);
+                        addLog("Data source engine set to: SIMULATED MOCK MODE (Dev/Testing)");
+                      }}
+                      style={{
+                        ...styles.actionBtn,
+                        backgroundColor: forceMockMode ? "#ff9f0a" : "rgba(255,255,255,0.05)",
+                        color: forceMockMode ? "#ffffff" : "#aeaeb2",
+                        border: forceMockMode ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      ⚠️ Force Simulated Mock Mode
+                    </button>
+                  </div>
+                </div>
+
                 <div style={styles.ctrlGroup}>
                   <span style={styles.ctrlLabel}>Active Provider Feed:</span>
                   <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>

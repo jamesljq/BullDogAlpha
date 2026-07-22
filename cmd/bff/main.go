@@ -889,8 +889,9 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		interval = granularity
 	}
 
+	forceMock := r.URL.Query().Get("mode") == "mock" || r.URL.Query().Get("mock") == "true"
 	apiKey := os.Getenv("FEED_API_KEY")
-	if apiKey == "" {
+	if apiKey == "" || forceMock {
 		now := time.Now()
 		var startTime time.Time
 		switch granularity {
@@ -919,6 +920,8 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"bars":    fallbackBars,
+			"source":  "mock",
+			"is_mock": true,
 		})
 		return
 	}
@@ -1147,14 +1150,22 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	isMock := (len(bars) == 0)
 	if len(bars) == 0 {
 		bars = generateFallbackBars(ticker, interval, startTime, now)
+	}
+
+	srcName := vendor
+	if isMock {
+		srcName = "mock"
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"bars":    bars,
+		"source":  srcName,
+		"is_mock": isMock,
 	})
 }
 

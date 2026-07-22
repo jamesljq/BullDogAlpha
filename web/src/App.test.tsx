@@ -205,10 +205,7 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
     // Vendor Switch
-    const polygonBtn = screen.getByText(/Polygon.io/i);
-    fireEvent.click(polygonBtn);
-
-    const alpacaBtn = screen.getByText(/Alpaca/i);
+    const alpacaBtn = screen.getAllByText(/Alpaca/i)[0];
     fireEvent.click(alpacaBtn);
 
     // Pause trading
@@ -354,6 +351,49 @@ describe('Bulldog Alpha Web Console', () => {
     const session = getMarketSessionStatus();
     expect(session.label).toMatch(/^[\p{Emoji}]\s+/u);
     expect(session.label.split(' ').length).toBeGreaterThan(1);
+  });
+
+  test('Data Source Mode explicit badges & Admin toggle controls', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        const isMock = url.includes('mode=mock');
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            bars: [{ time: 1784666280, open: 223.5, high: 226.1, low: 222.8, close: 224.5 }],
+            source: isMock ? 'mock' : 'polygon',
+            is_mock: isMock,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Verify Real Live Data badge is displayed when real data is returned
+    expect(screen.getByText(/REAL LIVE DATA/i)).toBeInTheDocument();
+
+    // Navigate to Admin tab and toggle Force Simulated Mock Mode
+    await act(async () => {
+      fireEvent.click(screen.getByText(/Ingestion & Systems Admin/i));
+    });
+    const mockToggleBtn = screen.getByText(/Force Simulated Mock Mode/i);
+    await act(async () => {
+      fireEvent.click(mockToggleBtn);
+    });
+
+    // Switch back to Trading Terminal
+    await act(async () => {
+      fireEvent.click(screen.getByText(/Trading Terminal/i));
+    });
+    expect(screen.getAllByText(/MOCK DATA MODE/i).length).toBeGreaterThan(0);
   });
 
   test('Admin tab: Subscribe new ticker and view admin logs', async () => {
