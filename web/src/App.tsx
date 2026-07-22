@@ -479,6 +479,7 @@ export default function App() {
   const [chartType, setChartType] = useState<"line" | "candlestick">("candlestick");
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
   const [selectedInterval, setSelectedInterval] = useState<string>("30m");
+  const [apiKeyInput, setApiKeyInput] = useState<string>("");
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -862,7 +863,28 @@ export default function App() {
         addLog(`MDG Vendor switched to: ${vendor.toUpperCase()}`);
       }
     } catch (err) {
-      addLog(`Failed to switch vendor: ${err}`);
+      addLog(`Failed to switch MDG Vendor: ${err}`);
+    }
+  };
+
+  const saveApiKey = async () => {
+    if (!apiKeyInput.trim()) return;
+    try {
+      const resp = await fetch("/api/mdg/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_api_key", api_key: apiKeyInput.trim() }),
+      });
+      if (resp.ok) {
+        addLog(`Market Data Feed API Key saved to system.`);
+        setApiKeyInput("");
+        setForceMockMode(false);
+        if (selectedTicker) {
+          fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+        }
+      }
+    } catch (err) {
+      addLog(`Failed to save API Key: ${err}`);
     }
   };
 
@@ -1214,6 +1236,93 @@ export default function App() {
             
             {/* Chart Card */}
             <div style={styles.card}>
+              {/* Trading Terminal Watchlist & Quick Add Stock Bar */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px',
+                paddingBottom: '16px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', marginRight: '4px' }}>Watchlist:</span>
+                  {(subscriptions.length > 0 ? subscriptions : ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL']).map(ticker => {
+                    const isSelected = selectedTicker === ticker;
+                    const stats = getStockStats(ticker);
+                    return (
+                      <button
+                        key={ticker}
+                        onClick={() => setSelectedTicker(ticker)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 14px',
+                          borderRadius: '16px',
+                          backgroundColor: isSelected ? 'rgba(10, 132, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                          border: `1px solid ${isSelected ? '#0a84ff' : 'rgba(255, 255, 255, 0.08)'}`,
+                          color: isSelected ? '#ffffff' : '#aeaeb2',
+                          fontWeight: isSelected ? 700 : 500,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        <span>{ticker}</span>
+                        <span style={{ fontSize: '12px', opacity: 0.8 }}>${stats.currentPrice.toFixed(2)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Add Stock (e.g. MSFT, META)"
+                    value={newTickerInput}
+                    onChange={(e) => setNewTickerInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTickerInput.trim()) {
+                        addSubscription(newTickerInput.trim());
+                      }
+                    }}
+                    style={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '8px',
+                      color: '#ffffff',
+                      padding: '6px 12px',
+                      fontSize: '13px',
+                      width: '180px',
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    className="apple-btn"
+                    onClick={() => {
+                      if (newTickerInput.trim()) {
+                        addSubscription(newTickerInput.trim());
+                      }
+                    }}
+                    style={{
+                      backgroundColor: '#30d158',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + Add Stock
+                  </button>
+                </div>
+              </div>
+
               {/* Robinhood Stock Title & Price Header */}
               {selectedTicker && (
                 <div style={{ marginBottom: '20px' }}>
@@ -1576,6 +1685,44 @@ export default function App() {
                       }}
                     >
                       Alpaca
+                    </button>
+                  </div>
+                </div>
+
+                <div style={styles.ctrlGroup}>
+                  <span style={styles.ctrlLabel}>Market Data API Key:</span>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <input
+                      type="password"
+                      placeholder={activeVendor === "alpaca" ? "KEY_ID:SECRET_KEY" : "Polygon API Key"}
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && apiKeyInput.trim()) {
+                          saveApiKey();
+                        }
+                      }}
+                      style={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '8px',
+                        color: '#ffffff',
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        flexGrow: 1,
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      className="apple-btn"
+                      onClick={saveApiKey}
+                      style={{
+                        ...styles.actionBtn,
+                        backgroundColor: '#0a84ff',
+                        color: '#ffffff',
+                      }}
+                    >
+                      Save Key
                     </button>
                   </div>
                 </div>

@@ -561,8 +561,9 @@ func (bff *BFFServer) HandleMdgControlAPI(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		Action string `json:"action"` // "pause", "resume", "set_vendor"
+		Action string `json:"action"` // "pause", "resume", "set_vendor", "set_api_key"
 		Vendor string `json:"vendor"` // "polygon" or "alpaca"
+		APIKey string `json:"api_key"`
 		URL    string `json:"url"`    // optional custom stream URL
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -595,6 +596,14 @@ func (bff *BFFServer) HandleMdgControlAPI(w http.ResponseWriter, r *http.Request
 			"vendor": req.Vendor,
 			"url":    req.URL,
 		})
+	case "set_api_key":
+		if req.APIKey != "" {
+			_ = bff.redisClient.Set(ctx, "mdg:api_key", req.APIKey, 0)
+			os.Setenv("FEED_API_KEY", req.APIKey)
+			evtPayload, _ = json.Marshal(map[string]interface{}{
+				"action": "set_api_key",
+			})
+		}
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 		return
@@ -891,6 +900,9 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 
 	forceMock := r.URL.Query().Get("mode") == "mock" || r.URL.Query().Get("mock") == "true"
 	apiKey := os.Getenv("FEED_API_KEY")
+	if apiKey == "" {
+		apiKey, _ = bff.redisClient.Get(r.Context(), "mdg:api_key").Result()
+	}
 	if apiKey == "" || forceMock {
 		now := time.Now()
 		var startTime time.Time
