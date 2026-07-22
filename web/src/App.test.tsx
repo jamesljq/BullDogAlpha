@@ -611,4 +611,67 @@ describe('Bulldog Alpha Web Console', () => {
     fireEvent.click(screen.getByText(/Trading Terminal/i));
     expect(screen.getByText(/Trading Terminal/i)).toBeInTheDocument();
   });
+
+  test('Trading Terminal Watchlist chip click switches active stock title, chart and stats', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        const isMsft = url.includes('ticker=MSFT');
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            bars: [{ time: 1784666280, open: isMsft ? 448.0 : 223.5, high: isMsft ? 450.0 : 226.1, low: isMsft ? 445.0 : 222.8, close: isMsft ? 448.37 : 224.5 }],
+            source: 'alpaca',
+            is_mock: false,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL', 'MSFT'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Find and click the MSFT chip in the Trading Terminal Watchlist
+    const msftChips = screen.getAllByText('MSFT');
+    await act(async () => {
+      fireEvent.click(msftChips[0]);
+    });
+
+    // Header stock title should update to Microsoft Corp. (MSFT)
+    expect(screen.getByText(/Microsoft Corp\. \(MSFT\)/i)).toBeInTheDocument();
+  });
+
+  test('Off-hours alert banner text dynamically reflects real vs simulated mode without contradictory statements', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            bars: [{ time: 1784666280, open: 223.5, high: 226.1, low: 222.8, close: 224.5 }],
+            source: 'mock',
+            is_mock: true,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Off-hours banner must say 'Displaying simulated off-hours session bars' when is_mock is true
+    const simulatedBanner = screen.getByText(/Displaying simulated off-hours session bars/i);
+    expect(simulatedBanner).toBeInTheDocument();
+    expect(screen.queryByText(/Displaying real historical session bars/i)).not.toBeInTheDocument();
+  });
 });
