@@ -797,7 +797,7 @@ describe('Bulldog Alpha Web Console', () => {
 
     const tagsBar = screen.getByTestId('header-status-tags-bar');
     expect(tagsBar).toBeInTheDocument();
-    expect(tagsBar).toHaveTextContent(/REGULAR MARKET/i);
+    expect(tagsBar).toHaveTextContent(/REAL LIVE DATA/i);
   });
 
   test('Chart fitContent is called on initial timeframe switch but NOT on incremental tick updates to preserve viewport zoom state', async () => {

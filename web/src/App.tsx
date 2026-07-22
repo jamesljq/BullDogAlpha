@@ -604,7 +604,7 @@ export default function App() {
     const intradayTicks = tickData[intradayKey] || [];
 
     // Always anchor currentPrice to the latest live price of the stock
-    let currentPrice = baseStats.currentPrice;
+    let currentPrice = 0.0;
     if (intradayCandles.length > 0) {
       currentPrice = intradayCandles[intradayCandles.length - 1].close;
     } else if (intradayTicks.length > 0) {
@@ -613,6 +613,8 @@ export default function App() {
       currentPrice = candleRaw[candleRaw.length - 1].close;
     } else if (rawData.length > 0) {
       currentPrice = rawData[rawData.length - 1].value;
+    } else if (forceMockMode || dataSourceInfo.isMock) {
+      currentPrice = baseStats.currentPrice;
     }
 
     // Start price of the selected timeframe
@@ -621,6 +623,8 @@ export default function App() {
       startPrice = candleRaw[0].open;
     } else if (rawData.length > 0) {
       startPrice = rawData[0].value;
+    } else if (forceMockMode || dataSourceInfo.isMock) {
+      startPrice = baseStats.open;
     }
 
     const change = currentPrice - startPrice;
@@ -706,6 +710,18 @@ export default function App() {
       }
     }
   }, [selectedTicker, selectedGranularity, selectedInterval, forceMockMode]);
+
+  // Pre-fetch 1d market data for all watchlist subscriptions so real prices display immediately
+  useEffect(() => {
+    if (subscriptions.length > 0) {
+      subscriptions.forEach(sym => {
+        const key = `${sym}_1d`;
+        if (!candleData[key] && !tickData[key]) {
+          fetchHistoricalData(sym, "1d", "30m");
+        }
+      });
+    }
+  }, [subscriptions, forceMockMode]);
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -1226,9 +1242,9 @@ export default function App() {
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
 
-  let openPrice = baseStats.open;
-  let dailyHigh = baseStats.high;
-  let dailyLow = baseStats.low;
+  let openPrice = (forceMockMode || dataSourceInfo.isMock) ? baseStats.open : 0;
+  let dailyHigh = (forceMockMode || dataSourceInfo.isMock) ? baseStats.high : 0;
+  let dailyLow = (forceMockMode || dataSourceInfo.isMock) ? baseStats.low : 0;
 
   if (intradayCandles.length > 0) {
     openPrice = intradayCandles[0].open;
@@ -1237,8 +1253,8 @@ export default function App() {
   }
 
   const currentPrice = periodInfo.currentPrice;
-  const wHigh = Math.max(currentPrice, dailyHigh, baseStats.wHigh);
-  const wLow = Math.min(currentPrice, dailyLow, baseStats.wLow);
+  const wHigh = currentPrice > 0 ? Math.max(currentPrice, dailyHigh, baseStats.wHigh) : baseStats.wHigh;
+  const wLow = (currentPrice > 0 && dailyLow > 0) ? Math.min(currentPrice, dailyLow, baseStats.wLow) : baseStats.wLow;
 
   const keyStats = {
     ...baseStats,
@@ -1779,7 +1795,7 @@ export default function App() {
                     }
                   }
 
-                  if (latestPrice === 0.0) {
+                  if (latestPrice === 0.0 && (forceMockMode || dataSourceInfo.isMock)) {
                     const stats = getStockStats(sym);
                     latestPrice = stats.currentPrice;
                     openPrice = stats.open;
@@ -1808,9 +1824,11 @@ export default function App() {
                       <span style={{ fontWeight: 600, color: '#ffffff' }}>{sym}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                          <span style={{ fontSize: '14px', fontWeight: 600 }}>${latestPrice.toFixed(2)}</span>
-                          <span style={{ fontSize: '11px', color: isUp ? '#30d158' : '#ff453a' }}>
-                            {isUp ? '+' : ''}{changePercent.toFixed(2)}%
+                          <span style={{ fontSize: '14px', fontWeight: 600 }}>
+                            {latestPrice > 0 ? `$${latestPrice.toFixed(2)}` : '--.--'}
+                          </span>
+                          <span style={{ fontSize: '11px', color: latestPrice > 0 ? (isUp ? '#30d158' : '#ff453a') : '#8e8e93' }}>
+                            {latestPrice > 0 ? `${isUp ? '+' : ''}${changePercent.toFixed(2)}%` : 'Loading...'}
                           </span>
                         </div>
                         <button
