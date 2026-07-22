@@ -1040,9 +1040,11 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Read active vendor from Redis
+	// Read active vendor from Redis with mandatory colon-key auto detection
 	vendor, err := bff.redisClient.Get(r.Context(), "mdg:vendor").Result()
-	if err != nil || vendor == "" {
+	if strings.Contains(apiKey, ":") {
+		vendor = "alpaca"
+	} else if err != nil || vendor == "" {
 		vendor = "polygon"
 	}
 

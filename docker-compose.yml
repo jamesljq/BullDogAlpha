@@ -63,12 +63,15 @@ services:
       "--mdg-addr=mdg:50053",
       "--risk-addr=risk_node:50051",
       "--ems-addr=ems:50052",
+      "--feed-api-key=${FEED_API_KEY:-}",
+      "--vendor=${FEED_VENDOR:-alpaca}",
       "--dev-mode"
     ]
     ports:
       - "8080:8080"
     environment:
       - FEED_API_KEY=${FEED_API_KEY:-}
+      - FEED_VENDOR=${FEED_VENDOR:-alpaca}
     depends_on:
       - redis
       - ems
