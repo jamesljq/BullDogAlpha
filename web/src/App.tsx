@@ -512,18 +512,28 @@ export default function App() {
     const granObj = GRANULARITIES.find(g => g.value === selectedGranularity) || GRANULARITIES[0];
     const baseStats = getStockStats(selectedTicker);
 
-    let currentPrice = baseStats.currentPrice;
-    let startPrice = currentPrice;
+    const intradayKey = `${selectedTicker}_1d`;
+    const intradayCandles = candleData[intradayKey] || [];
+    const intradayTicks = tickData[intradayKey] || [];
 
-    if (chartType === "line" && rawData.length > 0) {
-      startPrice = rawData[0].value;
-      currentPrice = rawData[rawData.length - 1].value;
-    } else if (chartType === "candlestick" && candleRaw.length > 0) {
-      startPrice = candleRaw[0].open;
+    // Always anchor currentPrice to the latest live price of the stock
+    let currentPrice = baseStats.currentPrice;
+    if (intradayCandles.length > 0) {
+      currentPrice = intradayCandles[intradayCandles.length - 1].close;
+    } else if (intradayTicks.length > 0) {
+      currentPrice = intradayTicks[intradayTicks.length - 1].value;
+    } else if (candleRaw.length > 0) {
       currentPrice = candleRaw[candleRaw.length - 1].close;
     } else if (rawData.length > 0) {
-      startPrice = rawData[0].value;
       currentPrice = rawData[rawData.length - 1].value;
+    }
+
+    // Start price of the selected timeframe
+    let startPrice = currentPrice;
+    if (chartType === "candlestick" && candleRaw.length > 0) {
+      startPrice = candleRaw[0].open;
+    } else if (rawData.length > 0) {
+      startPrice = rawData[0].value;
     }
 
     const change = currentPrice - startPrice;
@@ -590,6 +600,9 @@ export default function App() {
   useEffect(() => {
     if (selectedTicker) {
       fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+      if (selectedGranularity !== "1d") {
+        fetchHistoricalData(selectedTicker, "1d", "30m");
+      }
     }
   }, [selectedTicker, selectedGranularity, selectedInterval, forceMockMode]);
 
@@ -1048,9 +1061,10 @@ export default function App() {
 
   const periodInfo = getPeriodChangeInfo();
   const baseStats = getStockStats(selectedTicker);
+  const intradayKey = `${selectedTicker}_1d`;
+  const intradayCandles = candleData[intradayKey] || [];
   const activeKey = `${selectedTicker}_${selectedGranularity}`;
-  const rawDataForStats = tickData[activeKey] || [];
-  const candleRawForStats = candleData[activeKey] || [];
+  const rawDataForStats = tickData[activeKey] || tickData[intradayKey] || [];
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
 
@@ -1058,17 +1072,19 @@ export default function App() {
   let dailyHigh = baseStats.high;
   let dailyLow = baseStats.low;
 
-  if (candleRawForStats.length > 0) {
-    openPrice = candleRawForStats[0].open;
-    dailyHigh = Math.max(...candleRawForStats.map(b => b.high));
-    dailyLow = Math.min(...candleRawForStats.map(b => b.low));
+  if (intradayCandles.length > 0) {
+    openPrice = intradayCandles[0].open;
+    dailyHigh = Math.max(...intradayCandles.map(b => b.high));
+    dailyLow = Math.min(...intradayCandles.map(b => b.low));
   }
 
-  const wHigh = Math.max(dailyHigh, baseStats.wHigh);
-  const wLow = Math.min(dailyLow, baseStats.wLow);
+  const currentPrice = periodInfo.currentPrice;
+  const wHigh = Math.max(currentPrice, dailyHigh, baseStats.wHigh);
+  const wLow = Math.min(currentPrice, dailyLow, baseStats.wLow);
 
   const keyStats = {
     ...baseStats,
+    currentPrice,
     open: openPrice,
     high: dailyHigh,
     low: dailyLow,

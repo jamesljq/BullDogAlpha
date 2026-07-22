@@ -1007,8 +1007,8 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			timeframe = "1Day"
 		}
 
-		url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&start=%s&limit=1000",
-			ticker, timeframe, startTime.Format(time.RFC3339))
+		url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&start=%s&end=%s&sort=desc&limit=1000",
+			ticker, timeframe, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
 
 		req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
 		if err != nil {
@@ -1044,7 +1044,8 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&alpacaResp); err == nil {
 				tickerBars := alpacaResp.Bars[ticker]
-				for _, b := range tickerBars {
+				for i := len(tickerBars) - 1; i >= 0; i-- {
+					b := tickerBars[i]
 					bars = append(bars, ClientBar{
 						Time:  b.T.Unix(),
 						Open:  b.O,
