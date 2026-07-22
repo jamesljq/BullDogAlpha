@@ -1266,9 +1266,77 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 	}
 	now := time.Now().In(loc)
 
+	vendor, _ := bff.redisClient.Get(r.Context(), "mdg:vendor").Result()
+	if vendor == "" {
+		vendor = "polygon"
+	}
+
 	apiKey := os.Getenv("FEED_API_KEY")
 	if apiKey != "" {
 		client := &http.Client{Timeout: 3 * time.Second}
+
+		if vendor == "alpaca" && strings.Contains(apiKey, ":") {
+			parts := strings.Split(apiKey, ":")
+			if len(parts) == 2 {
+				keyID := parts[0]
+				secretKey := parts[1]
+				reqURL := "https://paper-api.alpaca.markets/v2/clock"
+				req, _ := http.NewRequestWithContext(r.Context(), "GET", reqURL, nil)
+				req.Header.Set("APCA-API-KEY-ID", keyID)
+				req.Header.Set("APCA-API-SECRET-KEY", secretKey)
+
+				resp, err := client.Do(req)
+				if err == nil && resp.StatusCode == http.StatusOK {
+					var clockResp struct {
+						IsOpen    bool   `json:"is_open"`
+						NextOpen  string `json:"next_open"`
+						NextClose string `json:"next_close"`
+					}
+					if json.NewDecoder(resp.Body).Decode(&clockResp) == nil {
+						resp.Body.Close()
+						if clockResp.IsOpen {
+							_ = json.NewEncoder(w).Encode(map[string]interface{}{
+								"is_closed":    false,
+								"label":        "● REGULAR MARKET",
+								"session_type": "REGULAR",
+								"source":       "alpaca_clock_api",
+							})
+							return
+						} else {
+							isHoliday, holidayName, _ := isUSMarketHoliday(now)
+							label := "● MARKET CLOSED"
+							if isHoliday {
+								label = fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName)
+							} else if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+								label = "● WEEKEND CLOSED"
+							} else {
+								hours := now.Hour()
+								minutes := now.Minute()
+								mins := hours*60 + minutes
+								if mins >= 4*60 && mins < 9*60+30 {
+									label = "● PRE-MARKET"
+								} else if mins >= 16*60 && mins < 20*60 {
+									label = "● EXTENDED HOURS"
+								} else {
+									label = "● NIGHT SESSION"
+								}
+							}
+							_ = json.NewEncoder(w).Encode(map[string]interface{}{
+								"is_closed":    true,
+								"label":        label,
+								"session_type": "CLOSED",
+								"source":       "alpaca_clock_api",
+							})
+							return
+						}
+					} else {
+						resp.Body.Close()
+					}
+				}
+			}
+		}
+
+		// Polygon Market Status query fallback
 		reqURL := fmt.Sprintf("https://api.polygon.io/v1/marketstatus/now?apiKey=%s", apiKey)
 		req, _ := http.NewRequestWithContext(r.Context(), "GET", reqURL, nil)
 		resp, err := client.Do(req)
