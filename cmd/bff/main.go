@@ -1353,15 +1353,10 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	isMock := (len(bars) == 0)
-	if len(bars) == 0 {
-		bars = generateFallbackBars(ticker, interval, startTime, now)
-	}
-
+	// Strict Rule: When Real Market Feed is active (apiKey != "" and !forceMock), NEVER fall back to Mock mode!
+	// If no data is returned, return empty bars with is_mock = false so UI displays explicit status without confusion.
 	srcName := vendor
-	if isMock {
-		srcName = "mock"
-	}
+	isMock := false
 
 	feedUsed := r.Header.Get("X-Alpaca-Feed-Used")
 	if feedUsed == "" {

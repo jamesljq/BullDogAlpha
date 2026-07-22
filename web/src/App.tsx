@@ -266,7 +266,7 @@ export const STOCK_DATA_MAP: Record<string, StockMetadata> = {
   },
 };
 
-export const getStockStats = (ticker: string, candleRaw?: Array<{ open: number, high: number, low: number, close: number }>) => {
+export const getStockStats = (ticker: string, candleRaw?: any[]) => {
   const meta = STOCK_DATA_MAP[ticker];
   if (meta) return meta;
   return {
@@ -557,41 +557,51 @@ export default function App() {
       const resp = await fetch(`/api/mdg/history?ticker=${ticker}&granularity=${granularity}&interval=${interval}${modeParam}`);
       if (resp.ok) {
         const data = await resp.json();
-        if (data.success && data.bars && data.bars.length > 0) {
-          const key = `${ticker}_${granularity}`;
-          const lineBars = data.bars.map((b: any) => ({ time: b.time, value: b.close }));
-          const candleBars = data.bars.map((b: any) => ({
-            time: b.time,
-            open: b.open,
-            high: b.high,
-            low: b.low,
-            close: b.close,
-          }));
+          if (data.success && data.bars) {
+            const key = `${ticker}_${granularity}`;
+            const lineBars = data.bars.map((b: any) => ({ time: b.time, value: b.close }));
+            const candleBars = data.bars.map((b: any) => ({
+              time: b.time,
+              open: b.open,
+              high: b.high,
+              low: b.low,
+              close: b.close,
+            }));
 
-          setTickData(prev => ({ ...prev, [key]: lineBars }));
-          setCandleData(prev => ({ ...prev, [key]: candleBars }));
+            setTickData(prev => ({ ...prev, [key]: lineBars }));
+            setCandleData(prev => ({ ...prev, [key]: candleBars }));
 
-          const isMock = data.is_mock ?? (data.source === "mock");
-          const sourceName = data.source || (isMock ? "mock" : activeVendor);
-          setDataSourceInfo({ isMock: !!isMock, source: sourceName });
+            const isMock = data.is_mock ?? (data.source === "mock");
+            const sourceName = data.source || (isMock ? "mock" : activeVendor);
+            setDataSourceInfo({ isMock: !!isMock, source: sourceName });
 
-          if (data.alpaca_feed) {
-            setAlpacaFeedLabel(data.alpaca_feed);
+            if (data.alpaca_feed) {
+              setAlpacaFeedLabel(data.alpaca_feed);
+            }
+
+            if (isMock) {
+              addLog(`Loaded simulated mock historical bars for ${ticker} (${granularity}, ${interval})`);
+            } else {
+              addLog(`Loaded REAL live market bars for ${ticker} (${data.bars.length} bars) via ${sourceName.toUpperCase()}`);
+            }
+            return;
           }
-
-          if (isMock) {
-            addLog(`Loaded simulated mock historical bars for ${ticker} (${granularity}, ${interval})`);
-          } else {
-            addLog(`Loaded REAL live market bars for ${ticker} via ${sourceName.toUpperCase()}`);
-          }
-          return;
         }
+      } catch (e) {
+        console.warn("Failed to fetch historical data:", e);
       }
-    } catch (e) {
-      console.warn("Failed to fetch historical data:", e);
-    }
     
-    // Fallback to high-fidelity mock if offline or failed
+    // Strict Rule: When Real Market Feed is active (!forceMockMode), NEVER generate fallback mock bars!
+    if (!forceMockMode) {
+      const key = `${ticker}_${granularity}`;
+      setTickData(prev => ({ ...prev, [key]: [] }));
+      setCandleData(prev => ({ ...prev, [key]: [] }));
+      setDataSourceInfo({ isMock: false, source: activeVendor });
+      addLog(`No real-time market data returned for ${ticker} (${granularity}). Strict No-Mock Fallback policy active.`);
+      return;
+    }
+
+    // Fallback to high-fidelity mock ONLY if developer explicitly requested Mock Mode
     const key = `${ticker}_${granularity}`;
     const granularitySec = GRANULARITIES.find(g => g.value === granularity)?.seconds || 60;
     
@@ -1067,6 +1077,14 @@ export default function App() {
         activeSeries.setData(data);
       }
 
+      if (chartRef.current) {
+        try {
+          chartRef.current.timeScale().fitContent();
+        } catch (e) {
+          // ignore fitContent error on unmounted chart
+        }
+      }
+
       const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker);
       const markers = symbolTrades.map(t => ({
         time: Math.floor(t.timestamp / 1000),
@@ -1261,92 +1279,6 @@ export default function App() {
             
             {/* Chart Card */}
             <div style={styles.card}>
-              {/* Trading Terminal Watchlist & Quick Add Stock Bar */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px',
-                paddingBottom: '16px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                flexWrap: 'wrap',
-                gap: '12px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', marginRight: '4px' }}>Watchlist:</span>
-                  {(subscriptions.length > 0 ? subscriptions : ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL']).map(ticker => {
-                    const isSelected = selectedTicker === ticker;
-                    const stats = getStockStats(ticker);
-                    return (
-                      <button
-                        key={ticker}
-                        onClick={() => setSelectedTicker(ticker)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 14px',
-                          borderRadius: '16px',
-                          backgroundColor: isSelected ? 'rgba(10, 132, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
-                          border: `1px solid ${isSelected ? '#0a84ff' : 'rgba(255, 255, 255, 0.08)'}`,
-                          color: isSelected ? '#ffffff' : '#aeaeb2',
-                          fontWeight: isSelected ? 700 : 500,
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        <span>{ticker}</span>
-                        <span style={{ fontSize: '12px', opacity: 0.8 }}>${stats.currentPrice.toFixed(2)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="Add Stock (e.g. MSFT, META)"
-                    value={newTickerInput}
-                    onChange={(e) => setNewTickerInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newTickerInput.trim()) {
-                        addSubscription(newTickerInput.trim());
-                      }
-                    }}
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      borderRadius: '8px',
-                      color: '#ffffff',
-                      padding: '6px 12px',
-                      fontSize: '13px',
-                      width: '180px',
-                      outline: 'none',
-                    }}
-                  />
-                  <button
-                    className="apple-btn"
-                    onClick={() => {
-                      if (newTickerInput.trim()) {
-                        addSubscription(newTickerInput.trim());
-                      }
-                    }}
-                    style={{
-                      backgroundColor: '#30d158',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '6px 14px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    + Add Stock
-                  </button>
-                </div>
-              </div>
 
               {/* Robinhood Stock Title & Price Header */}
               {selectedTicker && (
@@ -1493,6 +1425,22 @@ export default function App() {
                       <span>⚠️ <strong>DEV / MOCK DATA MODE ACTIVE:</strong> Currently displaying simulated pricing bars because no live market API key is set or Mock Mode is explicitly enabled. Configure your Polygon.io or Alpaca API key in the Admin tab for real-time market data.</span>
                     </div>
                   )}
+                  {!dataSourceInfo.isMock && (candleData[`${selectedTicker}_${selectedGranularity}`] || []).length === 0 && (
+                    <div style={{
+                      backgroundColor: 'rgba(255, 69, 58, 0.1)',
+                      border: '1px solid rgba(255, 69, 58, 0.25)',
+                      borderRadius: '8px',
+                      padding: '10px 14px',
+                      color: '#ff453a',
+                      fontSize: '13px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginTop: '12px',
+                    }}>
+                      <span>⚠️ <strong>NO REAL-TIME MARKET FEED DATA:</strong> No market feed bars returned for {selectedTicker} ({selectedGranularity}). Strict No-Mock Fallback is active (mock data fallback disabled).</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1621,12 +1569,34 @@ export default function App() {
               <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '12px' }}>Watchlist</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {subscriptions.map(sym => {
-                  const key = `${sym}_${selectedGranularity}`;
-                  const ticks = tickData[key] || [];
-                  const latestPrice = ticks.length > 0 ? ticks[ticks.length - 1].value : 0.0;
-                  const prevPrice = ticks.length > 1 ? ticks[ticks.length - 2].value : latestPrice;
-                  const changePercent = prevPrice !== 0 ? ((latestPrice - prevPrice) / prevPrice) * 100 : 0.0;
-                  const isUp = changePercent >= 0;
+                  let latestPrice = 0.0;
+                  let openPrice = 0.0;
+
+                  for (const gran of ['1d', '1w', '1M', '3M', 'ytd', '1y', '5y', 'all']) {
+                    const key = `${sym}_${gran}`;
+                    const candles = candleData[key];
+                    if (candles && candles.length > 0) {
+                      latestPrice = candles[candles.length - 1].close;
+                      openPrice = candles[0].open;
+                      break;
+                    }
+                    const ticks = tickData[key];
+                    if (ticks && ticks.length > 0) {
+                      latestPrice = ticks[ticks.length - 1].value;
+                      openPrice = ticks[0].value;
+                      break;
+                    }
+                  }
+
+                  if (latestPrice === 0.0) {
+                    const stats = getStockStats(sym);
+                    latestPrice = stats.currentPrice;
+                    openPrice = stats.open;
+                  }
+
+                  const change = latestPrice - openPrice;
+                  const changePercent = openPrice > 0 ? (change / openPrice) * 100 : 0.0;
+                  const isUp = change >= 0;
                   
                   return (
                     <div

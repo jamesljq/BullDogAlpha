@@ -564,18 +564,11 @@ describe('Bulldog Alpha Web Console', () => {
       render(<App />);
     });
 
-    // Verify Watchlist header text is present on Trading Terminal
-    expect(screen.getByText('Watchlist:')).toBeInTheDocument();
+    // Verify Watchlist header text is present on Right Sidebar Watchlist
+    expect(screen.getByText('Watchlist')).toBeInTheDocument();
 
-    // Type MSFT in Quick Add Stock input and click + Add Stock
-    const addInput = screen.getByPlaceholderText(/Add Stock \(e.g. MSFT, META\)/i);
-    fireEvent.change(addInput, { target: { value: 'MSFT' } });
-    await act(async () => {
-      fireEvent.click(screen.getByText('+ Add Stock'));
-    });
-
-    // Verify MSFT chip is rendered on Trading Terminal Watchlist
-    expect(screen.getAllByText('MSFT').length).toBeGreaterThan(0);
+    // Verify default tickers (AAPL, META) are present in Watchlist
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0);
   });
 
   test('Save API Key in Admin panel & Off-hours banner non-contradiction check', async () => {
