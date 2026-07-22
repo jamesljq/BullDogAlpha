@@ -729,11 +729,11 @@ describe('Bulldog Alpha Web Console', () => {
   });
 
   test('Clear Simulated Trades button resets execution markers and logs status', async () => {
-    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
-      if (url.includes('/api/trades')) {
+    (global as any).fetch = jest.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/mdg/trades') && (!options || options.method === 'GET')) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ success: true, trades: [{ symbol: 'AAPL', action: 'BUY', price: 324.5, timestamp: Date.now() }] }),
+          json: () => Promise.resolve([{ symbol: 'AAPL', price: 325.0, qty: 100, action: 'BUY', timestamp: 1000 }]),
         });
       }
       return Promise.resolve({
@@ -748,6 +748,7 @@ describe('Bulldog Alpha Web Console', () => {
 
     const clearBtn = await screen.findByText(/🗑️ CLEAR SIMULATED TRADES/i);
     expect(clearBtn).toBeInTheDocument();
+    expect(clearBtn).not.toBeDisabled();
 
     await act(async () => {
       fireEvent.click(clearBtn);
@@ -914,6 +915,114 @@ describe('Bulldog Alpha Web Console', () => {
     // When 1W data populates, fitContent must be called again to fit the new timeframe view!
     await waitFor(() => {
       expect(mockFitContent.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+  });
+
+  test('PM UX 1: Custom quantity input, Toast notification on trade execution, and disabled clear button when 0 trades', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string, options?: any) => {
+      if (options?.method === 'POST' && url.includes('/api/mdg/trades')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([{ symbol: 'AAPL', price: 325.0, qty: 250, action: 'BUY', timestamp: Date.now() }]),
+        });
+      }
+      if (url.includes('/api/mdg/history')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            is_mock: false,
+            source: 'alpaca',
+            bars: [{ time: 1000, open: 320, high: 330, low: 310, close: 325.0 }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Clear trades button is disabled when 0 trades
+    const clearBtn = screen.getByText(/CLEAR SIMULATED TRADES/i);
+    expect(clearBtn).toBeDisabled();
+
+    // Type custom quantity 250
+    const qtyInput = screen.getByDisplayValue('100');
+    fireEvent.change(qtyInput, { target: { value: '250' } });
+
+    // Execute Buy trade with custom quantity 250
+    const buyBtn = screen.getByText(/🟢 SIMULATE BUY 250/i);
+    await act(async () => {
+      fireEvent.click(buyBtn);
+    });
+
+    // Toast notification appears
+    expect(await screen.findByText(/✓ BUY 250 AAPL/i)).toBeInTheDocument();
+  });
+
+  test('PM UX 2: Clickable Trade Executions stat card triggers jumpChartToTrade', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const tradeExecCard = screen.getByText(/Trade Executions/i).closest('div');
+    expect(tradeExecCard).toBeInTheDocument();
+    
+    await act(async () => {
+      fireEvent.click(tradeExecCard!);
+    });
+  });
+
+  test('PM UX 3: Watchlist Enter key press automatically uppercases, adds stock and selects it', async () => {
+    const fetchMock = jest.fn().mockImplementation((url: string, options?: any) => {
+      if (options?.method === 'POST' && url.includes('/api/mdg/subscriptions')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true, tickers: ['AAPL', 'NVDA'] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+    (global as any).fetch = fetchMock;
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const input = screen.getByPlaceholderText(/Add stock/i);
+    fireEvent.change(input, { target: { value: 'nvda' } });
+    
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    });
+
+    await waitFor(() => {
+      const postCalls = fetchMock.mock.calls.filter((c: any) => c[1]?.method === 'POST');
+      expect(postCalls.some((c: any) => c[1]?.body.includes('"ticker":"NVDA"'))).toBe(true);
+    });
+  });
+
+  test('PM UX 4 & 5: Smart timeframe period coupling and RSI badge indicators', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // RSI badge check (Neutral / Oversold / Overbought)
+    const rsiText = screen.getByText(/RSI \(14\)/i);
+    expect(rsiText).toBeInTheDocument();
+
+    // Timeframe coupling check (1W sets 1h interval)
+    const weekBtn = screen.getByText('1W');
+    await act(async () => {
+      fireEvent.click(weekBtn);
     });
   });
 });

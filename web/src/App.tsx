@@ -565,6 +565,8 @@ export default function App() {
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
   const [selectedInterval, setSelectedInterval] = useState<string>("30m");
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+  const [customQty, setCustomQty] = useState<number>(100);
+  const [orderToast, setOrderToast] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -1048,6 +1050,7 @@ export default function App() {
     }
 
     const currentPrice = chartType === "line" ? ticks[ticks.length - 1].value : candles[candles.length - 1].close;
+    const qtyToUse = customQty > 0 ? customQty : 100;
     try {
       const resp = await fetch("/api/mdg/trades", {
         method: "POST",
@@ -1055,13 +1058,16 @@ export default function App() {
         body: JSON.stringify({
           symbol: selectedTicker,
           price: currentPrice,
-          qty: 100,
+          qty: qtyToUse,
           action: action,
         }),
       });
       if (resp.ok) {
         const data = await resp.json();
-        addLog(`Simulated execution recorded: ${action} 100 ${selectedTicker} @ $${currentPrice}`);
+        const msg = `Simulated execution recorded: ${action} ${qtyToUse} ${selectedTicker} @ $${currentPrice.toFixed(2)}`;
+        addLog(msg);
+        setOrderToast(`✓ ${action} ${qtyToUse} ${selectedTicker} @ $${currentPrice.toFixed(2)}`);
+        setTimeout(() => setOrderToast(null), 2500);
       }
     } catch (err) {
       addLog(`Failed to record simulated execution: ${err}`);
@@ -1628,7 +1634,22 @@ export default function App() {
                   return (
                     <button
                       key={g.value}
-                      onClick={() => setSelectedGranularity(g.value)}
+                      onClick={() => {
+                        setSelectedGranularity(g.value);
+                        const recMap: Record<string, string> = {
+                          '1d': '15m',
+                          '1w': '1h',
+                          '1M': '1d',
+                          '3M': '1d',
+                          'ytd': '1d',
+                          '1y': '1d',
+                          '5y': '1w',
+                          'all': '1w',
+                        };
+                        if (recMap[g.value]) {
+                          setSelectedInterval(recMap[g.value]);
+                        }
+                      }}
                       className="apple-btn"
                       style={{
                         background: 'none',
@@ -1671,12 +1692,38 @@ export default function App() {
                 </div>
                 <div style={styles.statBox}>
                   <span style={styles.statLabel}>RSI (14)</span>
-                  <span style={{
-                    ...styles.statValue,
-                    color: parseFloat(currentRsi) > 70 ? '#ff453a' : parseFloat(currentRsi) < 30 ? '#30d158' : '#0a84ff'
-                  }}>{currentRsi}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      ...styles.statValue,
+                      color: parseFloat(currentRsi) > 70 ? '#ff453a' : parseFloat(currentRsi) < 30 ? '#30d158' : '#0a84ff'
+                    }}>{currentRsi}</span>
+                    {parseFloat(currentRsi) < 30 && (
+                      <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '6px', backgroundColor: 'rgba(48, 209, 88, 0.15)', color: '#30d158', border: '1px solid rgba(48, 209, 88, 0.3)' }}>Oversold</span>
+                    )}
+                    {parseFloat(currentRsi) > 70 && (
+                      <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '6px', backgroundColor: 'rgba(255, 69, 58, 0.15)', color: '#ff453a', border: '1px solid rgba(255, 69, 58, 0.3)' }}>Overbought</span>
+                    )}
+                    {parseFloat(currentRsi) >= 30 && parseFloat(currentRsi) <= 70 && (
+                      <span style={{ fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '6px', backgroundColor: 'rgba(142, 142, 147, 0.15)', color: '#8e8e93', border: '1px solid rgba(142, 142, 147, 0.3)' }}>Neutral</span>
+                    )}
+                  </div>
                 </div>
-                <div style={styles.statBox}>
+                <div
+                  style={{
+                    ...styles.statBox,
+                    cursor: currentExecCount > 0 ? 'pointer' : 'default',
+                    transition: 'all 0.2s',
+                  }}
+                  onClick={() => {
+                    if (currentExecCount > 0 && Array.isArray(trades)) {
+                      const symTrades = trades.filter(t => t && t.symbol === selectedTicker);
+                      if (symTrades.length > 0) {
+                        jumpChartToTrade(symTrades[symTrades.length - 1].timestamp);
+                      }
+                    }
+                  }}
+                  title={currentExecCount > 0 ? "Click to jump chart viewport to latest execution" : "No executions recorded yet"}
+                >
                   <span style={styles.statLabel}>Trade Executions</span>
                   <span style={{ ...styles.statValue, color: currentExecCount > 0 ? '#30d158' : '#8e8e93' }}>
                     {currentExecCount} {currentExecCount === 1 ? 'execution' : 'executions'}
@@ -1691,26 +1738,87 @@ export default function App() {
             
             {/* Quick Trade Form */}
             {selectedTicker && (
-              <div style={styles.card}>
-                <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '16px' }}>Trade {selectedTicker}</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ ...styles.card, position: 'relative' }}>
+                {orderToast && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-14px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    backgroundColor: '#30d158',
+                    color: '#000000',
+                    fontWeight: 700,
+                    fontSize: '12px',
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 12px rgba(48, 209, 88, 0.4)',
+                    whiteSpace: 'nowrap',
+                    zIndex: 10,
+                  }}>
+                    {orderToast}
+                  </div>
+                )}
+                <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '14px' }}>Trade {selectedTicker}</h3>
+                
+                {/* Quantity Input Bar */}
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>Order Quantity</span>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        onClick={() => setCustomQty(q => q + 100)}
+                        style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '4px', color: '#0a84ff', fontSize: '11px', fontWeight: 600, padding: '2px 6px', cursor: 'pointer' }}
+                      >+100</button>
+                      <button
+                        onClick={() => setCustomQty(q => q + 500)}
+                        style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '4px', color: '#0a84ff', fontSize: '11px', fontWeight: 600, padding: '2px 6px', cursor: 'pointer' }}
+                      >+500</button>
+                      <button
+                        onClick={() => setCustomQty(100)}
+                        style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '4px', color: '#8e8e93', fontSize: '11px', fontWeight: 600, padding: '2px 6px', cursor: 'pointer' }}
+                      >Reset</button>
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100000"
+                    value={customQty}
+                    onChange={(e) => setCustomQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '8px',
+                      color: '#ffffff',
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <button
                     className="apple-btn"
                     onClick={() => executeSimulatedTrade("BUY")}
                     style={{ ...styles.actionBtn, backgroundColor: 'rgba(48, 209, 88, 0.2)', border: '1px solid rgba(48,209,88,0.4)', color: '#30d158', width: '100%', height: '40px', fontSize: '13px', fontWeight: 600 }}
                   >
-                    🟢 SIMULATE BUY 100
+                    🟢 SIMULATE BUY {customQty}
                   </button>
                   <button
                     className="apple-btn"
                     onClick={() => executeSimulatedTrade("SELL")}
                     style={{ ...styles.actionBtn, backgroundColor: 'rgba(255, 69, 58, 0.2)', border: '1px solid rgba(255,69,58,0.4)', color: '#ff453a', width: '100%', height: '40px', fontSize: '13px', fontWeight: 600 }}
                   >
-                    🔴 SIMULATE SELL 100
+                    🔴 SIMULATE SELL {customQty}
                   </button>
                   <button
                     className="apple-btn"
                     onClick={clearSimulatedTrades}
+                    disabled={currentExecCount === 0}
                     style={{
                       ...styles.actionBtn,
                       backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -1720,9 +1828,11 @@ export default function App() {
                       height: '32px',
                       fontSize: '11px',
                       fontWeight: 600,
-                      marginTop: '4px'
+                      marginTop: '4px',
+                      opacity: currentExecCount === 0 ? 0.4 : 1,
+                      cursor: currentExecCount === 0 ? 'not-allowed' : 'pointer',
                     }}
-                    title="Clear all simulated trade execution markers"
+                    title={currentExecCount === 0 ? "No simulated trades to clear" : "Clear all simulated trade execution markers"}
                   >
                     🗑️ CLEAR SIMULATED TRADES
                   </button>
