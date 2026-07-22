@@ -4,6 +4,8 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom';
 import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP, aggregateTradeMarkers, TradeMarker } from './App';
 
+const mockFitContent = jest.fn();
+
 // Mock lightweight-charts
 jest.mock('lightweight-charts', () => ({
   createChart: jest.fn(() => ({
@@ -14,6 +16,7 @@ jest.mock('lightweight-charts', () => ({
     })),
     applyOptions: jest.fn(),
     timeScale: jest.fn(() => ({
+      fitContent: mockFitContent,
       setVisibleRange: jest.fn(),
     })),
     remove: jest.fn(),
@@ -795,5 +798,30 @@ describe('Bulldog Alpha Web Console', () => {
     const tagsBar = screen.getByTestId('header-status-tags-bar');
     expect(tagsBar).toBeInTheDocument();
     expect(tagsBar).toHaveTextContent(/REGULAR MARKET/i);
+  });
+
+  test('Chart fitContent is called on initial timeframe switch but NOT on incremental tick updates to preserve viewport zoom state', async () => {
+    mockFitContent.mockClear();
+
+    (global as any).fetch = jest.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+    }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Initial render calls fitContent once for initial ticker/timeframe setup
+    const initialCallCount = mockFitContent.mock.calls.length;
+
+    // Simulate incremental tick / state update by clicking BUY
+    const buyBtn = screen.getByText(/🟢 SIMULATE BUY 100/i);
+    await act(async () => {
+      fireEvent.click(buyBtn);
+    });
+
+    // Incremental trade/tick update MUST NOT trigger fitContent again, preserving user zoom!
+    expect(mockFitContent.mock.calls.length).toBe(initialCallCount);
   });
 });
