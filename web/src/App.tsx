@@ -272,12 +272,37 @@ export const getStockStats = (ticker: string, candleRaw: Array<{ open: number, h
 
 
 export default function App() {
-  const [isMarketClosed, setIsMarketClosed] = useState<boolean>(checkIsMarketClosed());
+  const [marketInfo, setMarketInfo] = useState<MarketSessionInfo>(getMarketSessionStatus());
+  const isMarketClosed = marketInfo.isClosed;
 
-  // Periodically check if market is closed
+  const fetchMarketStatus = async () => {
+    try {
+      const resp = await fetch("/api/market-status");
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.label) {
+          setMarketInfo({
+            isClosed: data.is_closed,
+            label: data.label,
+            badgeBg: data.is_closed ? (data.session_type === 'HOLIDAY' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 159, 10, 0.15)') : 'rgba(48, 209, 88, 0.15)',
+            badgeBorder: data.is_closed ? (data.session_type === 'HOLIDAY' ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 159, 10, 0.3)') : 'rgba(48, 209, 88, 0.3)',
+            badgeColor: data.is_closed ? (data.session_type === 'HOLIDAY' ? '#ff453a' : '#ff9f0a') : '#30d158',
+            sessionType: data.session_type || 'REGULAR',
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      // fallback
+    }
+    setMarketInfo(getMarketSessionStatus());
+  };
+
+  // Periodically check market status API
   useEffect(() => {
+    fetchMarketStatus();
     const timer = setInterval(() => {
-      setIsMarketClosed(checkIsMarketClosed());
+      fetchMarketStatus();
     }, 15000);
     return () => clearInterval(timer);
   }, []);
@@ -981,11 +1006,11 @@ export default function App() {
                         fontWeight: 600,
                         padding: '3px 9px',
                         borderRadius: '12px',
-                        backgroundColor: getMarketSessionStatus().badgeBg,
-                        color: getMarketSessionStatus().badgeColor,
-                        border: `1px solid ${getMarketSessionStatus().badgeBorder}`
+                        backgroundColor: marketInfo.badgeBg,
+                        color: marketInfo.badgeColor,
+                        border: `1px solid ${marketInfo.badgeBorder}`
                       }}>
-                        {getMarketSessionStatus().label}
+                        {marketInfo.label}
                       </span>
                     </div>
 
@@ -1051,7 +1076,7 @@ export default function App() {
                 </div>
               )}
 
-              {getMarketSessionStatus().isClosed && (
+              {marketInfo.isClosed && (
                 <div style={{
                   backgroundColor: 'rgba(10, 132, 255, 0.08)',
                   border: '1px solid rgba(10, 132, 255, 0.2)',
@@ -1065,7 +1090,7 @@ export default function App() {
                   marginBottom: '16px',
                 }}>
                   <span>🌙</span>
-                  <span>Off-hours session active ({getMarketSessionStatus().label.replace('● ', '')}). Displaying real historical session bars from recent market open & night trading.</span>
+                  <span>Off-hours session active ({marketInfo.label.replace('● ', '')}). Displaying real historical session bars from recent market open & night trading.</span>
                 </div>
               )}
 

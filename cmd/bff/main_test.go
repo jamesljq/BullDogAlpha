@@ -662,6 +662,57 @@ func TestBFFShutdownAPI(t *testing.T) {
 	}
 }
 
+func TestBFFMarketStatusAPI(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	bff := NewBFFServer(rdb, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/market-status", nil)
+	bff.HandleMarketStatusAPI(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if _, ok := resp["is_closed"]; !ok {
+		t.Error("expected is_closed field in response")
+	}
+	if _, ok := resp["label"]; !ok {
+		t.Error("expected label field in response")
+	}
+}
+
+func TestUSMarketHolidayEngine(t *testing.T) {
+	loc, _ := time.LoadLocation("America/New_York")
+
+	// July 4th 2026 is Saturday -> observed Friday July 3rd
+	july3_2026 := time.Date(2026, time.July, 3, 10, 0, 0, 0, loc)
+	isHoliday, name, _ := isUSMarketHoliday(july3_2026)
+	if !isHoliday {
+		t.Errorf("expected July 3rd 2026 to be observed July 4th holiday, got name: %s", name)
+	}
+
+	// Thanksgiving 2026 is Nov 26
+	thanksgiving := time.Date(2026, time.November, 26, 10, 0, 0, 0, loc)
+	isHoliday, name, _ = isUSMarketHoliday(thanksgiving)
+	if !isHoliday {
+		t.Errorf("expected Thanksgiving to be holiday, got name: %s", name)
+	}
+}
+
 func TestBFFMdgConfigAPI(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {

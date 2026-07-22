@@ -818,6 +818,7 @@ func runBFF(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("/api/mdg/control", bff.HandleMdgControlAPI)
 	mux.HandleFunc("/api/mdg/trades", bff.HandleMdgTradesAPI)
 	mux.HandleFunc("/api/mdg/history", bff.HandleMdgHistoryAPI)
+	mux.HandleFunc("/api/market-status", bff.HandleMarketStatusAPI)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -1253,4 +1254,230 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 		currTime = currTime.Add(step)
 	}
 	return bars
+}
+
+func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		loc = time.FixedZone("EST", -5*3600)
+	}
+	now := time.Now().In(loc)
+
+	apiKey := os.Getenv("FEED_API_KEY")
+	if apiKey != "" {
+		client := &http.Client{Timeout: 3 * time.Second}
+		reqURL := fmt.Sprintf("https://api.polygon.io/v1/marketstatus/now?apiKey=%s", apiKey)
+		req, _ := http.NewRequestWithContext(r.Context(), "GET", reqURL, nil)
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			var polyResp struct {
+				Market     string `json:"market"`
+				AfterHours bool   `json:"afterHours"`
+				EarlyHours bool   `json:"earlyHours"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&polyResp) == nil {
+				resp.Body.Close()
+				if polyResp.Market == "closed" {
+					isHoliday, holidayName, _ := isUSMarketHoliday(now)
+					label := "● MARKET CLOSED"
+					if isHoliday {
+						label = fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName)
+					} else if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+						label = "● WEEKEND CLOSED"
+					} else if polyResp.AfterHours {
+						label = "● EXTENDED HOURS"
+					} else if polyResp.EarlyHours {
+						label = "● PRE-MARKET"
+					} else {
+						label = "● NIGHT SESSION"
+					}
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"is_closed":    true,
+						"label":        label,
+						"session_type": "CLOSED",
+						"source":       "polygon_api",
+					})
+					return
+				} else if polyResp.Market == "open" {
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"is_closed":    false,
+						"label":        "● REGULAR MARKET",
+						"session_type": "REGULAR",
+						"source":       "polygon_api",
+					})
+					return
+				}
+			} else {
+				resp.Body.Close()
+			}
+		}
+	}
+
+	isHoliday, holidayName, isEarlyClose := isUSMarketHoliday(now)
+	if isHoliday {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    true,
+			"label":        fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName),
+			"session_type": "HOLIDAY",
+			"reason":       holidayName,
+			"source":       "exchange_calendar",
+		})
+		return
+	}
+
+	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    true,
+			"label":        "● WEEKEND CLOSED",
+			"session_type": "WEEKEND",
+			"source":       "exchange_calendar",
+		})
+		return
+	}
+
+	hours := now.Hour()
+	minutes := now.Minute()
+	mins := hours*60 + minutes
+
+	preMarketStart := 4 * 60
+	marketOpen := 9*60 + 30
+	marketClose := 16 * 60
+	if isEarlyClose {
+		marketClose = 13 * 60
+	}
+	extendedClose := 20 * 60
+
+	if mins >= marketOpen && mins < marketClose {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    false,
+			"label":        "● REGULAR MARKET",
+			"session_type": "REGULAR",
+			"source":       "exchange_calendar",
+		})
+	} else if mins >= preMarketStart && mins < marketOpen {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    true,
+			"label":        "● PRE-MARKET",
+			"session_type": "PRE_MARKET",
+			"source":       "exchange_calendar",
+		})
+	} else if mins >= marketClose && mins < extendedClose {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    true,
+			"label":        "● EXTENDED HOURS",
+			"session_type": "EXTENDED",
+			"source":       "exchange_calendar",
+		})
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"is_closed":    true,
+			"label":        "● NIGHT SESSION",
+			"session_type": "NIGHT",
+			"source":       "exchange_calendar",
+		})
+	}
+}
+
+func isUSMarketHoliday(t time.Time) (bool, string, bool) {
+	year, month, day := t.Date()
+	weekday := t.Weekday()
+
+	nthWeekday := func(targetWeekday time.Weekday, n int) bool {
+		if weekday != targetWeekday {
+			return false
+		}
+		return (day-1)/7 == (n - 1)
+	}
+
+	lastWeekday := func(targetWeekday time.Weekday) bool {
+		if weekday != targetWeekday {
+			return false
+		}
+		return day+7 > time.Date(year, month+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	}
+
+	if (month == time.January && day == 1 && weekday != time.Sunday && weekday != time.Saturday) ||
+		(month == time.January && day == 2 && weekday == time.Monday) {
+		return true, "New Year's Day", false
+	}
+
+	if month == time.January && nthWeekday(time.Monday, 3) {
+		return true, "MLK Jr. Day", false
+	}
+
+	if month == time.February && nthWeekday(time.Monday, 3) {
+		return true, "Presidents' Day", false
+	}
+
+	easterMonth, easterDay := calculateEaster(year)
+	easterDate := time.Date(year, time.Month(easterMonth), easterDay, 0, 0, 0, 0, t.Location())
+	goodFridayDate := easterDate.AddDate(0, 0, -2)
+	if month == goodFridayDate.Month() && day == goodFridayDate.Day() {
+		return true, "Good Friday", false
+	}
+
+	if month == time.May && lastWeekday(time.Monday) {
+		return true, "Memorial Day", false
+	}
+
+	if (month == time.June && day == 19 && weekday != time.Sunday && weekday != time.Saturday) ||
+		(month == time.June && day == 20 && weekday == time.Monday) ||
+		(month == time.June && day == 18 && weekday == time.Friday) {
+		return true, "Juneteenth National Independence Day", false
+	}
+
+	if (month == time.July && day == 4 && weekday != time.Sunday && weekday != time.Saturday) ||
+		(month == time.July && day == 5 && weekday == time.Monday) ||
+		(month == time.July && day == 3 && weekday == time.Friday) {
+		return true, "Independence Day (July 4th)", false
+	}
+
+	if month == time.July && day == 3 && weekday != time.Saturday && weekday != time.Sunday && weekday != time.Friday {
+		return false, "Independence Day Eve", true
+	}
+
+	if month == time.September && nthWeekday(time.Monday, 1) {
+		return true, "Labor Day", false
+	}
+
+	if month == time.November && nthWeekday(time.Thursday, 4) {
+		return true, "Thanksgiving Day", false
+	}
+
+	if month == time.November && nthWeekday(time.Friday, 4) {
+		return false, "Black Friday", true
+	}
+
+	if (month == time.December && day == 25 && weekday != time.Sunday && weekday != time.Saturday) ||
+		(month == time.December && day == 26 && weekday == time.Monday) ||
+		(month == time.December && day == 24 && weekday == time.Friday) {
+		return true, "Christmas Day", false
+	}
+
+	if month == time.December && day == 24 && weekday != time.Saturday && weekday != time.Sunday && weekday != time.Friday {
+		return false, "Christmas Eve", true
+	}
+
+	return false, "", false
+}
+
+func calculateEaster(year int) (int, int) {
+	a := year % 19
+	b := year / 100
+	c := year % 100
+	d := b / 4
+	e := b % 4
+	f := (b + 8) / 25
+	g := (b - f + 1) / 3
+	h := (19*a + b - d - g + 15) % 30
+	i := c / 4
+	k := c % 4
+	l := (32 + 2*e + 2*i - h - k) % 7
+	m := (a + 11*h + 22*l) / 451
+	month := (h + l - 7*m + 114) / 31
+	day := ((h + l - 7*m + 114) % 31) + 1
+	return month, day
 }
