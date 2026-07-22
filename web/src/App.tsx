@@ -573,6 +573,7 @@ export default function App() {
   const [activeSeries, setActiveSeries] = useState<any>(null);
   const seriesMarkersRef = useRef<any>(null);
   const loadedKeyRef = useRef<string>("");
+  const shouldFitContentRef = useRef<boolean>(true);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -1164,6 +1165,11 @@ export default function App() {
     }
   }, [chartType, activeTab]);
 
+  // Flag viewport fitting whenever ticker, granularity, bar interval, or chart type changes
+  useEffect(() => {
+    shouldFitContentRef.current = true;
+  }, [selectedTicker, selectedGranularity, selectedInterval, chartType]);
+
   // Update active series tick/candle data & execution markers
   useEffect(() => {
     if (activeSeries && chartRef.current) {
@@ -1174,18 +1180,20 @@ export default function App() {
         if (chartType === "candlestick" && currentSeriesType !== "Candlestick") return;
       }
 
+      let hasData = false;
       if (chartType === "line") {
         const data = tickData[key] || [];
         activeSeries.setData(data);
+        hasData = data.length > 0;
       } else {
         const data = candleData[key] || [];
         activeSeries.setData(data);
+        hasData = data.length > 0;
       }
 
-      // ONLY call fitContent on initial timeframe/symbol/chartType switch, preserve zoom on ticks
-      const currentKey = `${selectedTicker}_${selectedGranularity}_${chartType}`;
-      if (loadedKeyRef.current !== currentKey) {
-        loadedKeyRef.current = currentKey;
+      // Re-fit chart viewport ONLY when user switches granularity/interval/symbol AND new data has populated
+      if (shouldFitContentRef.current && hasData) {
+        shouldFitContentRef.current = false;
         if (chartRef.current) {
           try {
             chartRef.current.timeScale().fitContent();
