@@ -1218,18 +1218,20 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 		step = totalDuration / 20
 	}
 
-	basePrice := 320.0
+	basePrice := 224.50
 	switch ticker {
 	case "AAPL":
-		basePrice = 327.0
+		basePrice = 224.50
 	case "MSFT":
-		basePrice = 450.0
+		basePrice = 448.37
 	case "NVDA":
-		basePrice = 120.0
+		basePrice = 122.50
+	case "TSLA":
+		basePrice = 251.50
 	case "AMZN":
-		basePrice = 180.0
-	case "GOOGL":
-		basePrice = 175.0
+		basePrice = 186.40
+	case "GOOG", "GOOGL":
+		basePrice = 178.60
 	}
 
 	bars := make([]ClientBar, 0, count)
@@ -1237,11 +1239,22 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 	currPrice := basePrice
 
 	for i := 0; i < count; i++ {
-		delta := (float64((i*17+31)%100)/100.0 - 0.48) * (currPrice * 0.015)
-		openP := currPrice
-		closeP := currPrice + delta
-		highP := math.Max(openP, closeP) + float64((i*7)%10)*0.15
-		lowP := math.Min(openP, closeP) - float64((i*11)%10)*0.15
+		isLast := (i == count-1)
+		var openP, closeP, highP, lowP float64
+
+		if isLast {
+			closeP = basePrice
+			openP = basePrice - 0.70
+			highP = basePrice + 0.90
+			lowP = basePrice - 1.10
+		} else {
+			delta := (float64((i*17+31)%100)/100.0 - 0.48) * (currPrice * 0.005)
+			openP = currPrice
+			closeP = currPrice + delta
+			highP = math.Max(openP, closeP) + float64((i*7)%10)*0.10
+			lowP = math.Min(openP, closeP) - float64((i*11)%10)*0.10
+			currPrice = closeP
+		}
 
 		bars = append(bars, ClientBar{
 			Time:  currTime.Unix(),
@@ -1250,7 +1263,6 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 			Low:   math.Round(lowP*100) / 100,
 			Close: math.Round(closeP*100) / 100,
 		})
-		currPrice = closeP
 		currTime = currTime.Add(step)
 	}
 	return bars

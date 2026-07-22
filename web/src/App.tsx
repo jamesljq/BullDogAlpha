@@ -175,9 +175,9 @@ export interface StockMetadata {
 export const STOCK_DATA_MAP: Record<string, StockMetadata> = {
   AAPL: {
     name: 'Apple Inc.',
-    currentPrice: 224.23,
+    currentPrice: 224.50,
     open: 223.50,
-    high: 225.40,
+    high: 226.10,
     low: 222.80,
     wHigh: 237.23,
     wLow: 164.08,
@@ -883,6 +883,34 @@ export default function App() {
   useEffect(() => {
     if (chartContainerRef.current) {
       try {
+        const formatTimeET = (timeSec: number) => {
+          const date = new Date(timeSec * 1000);
+          return date.toLocaleTimeString("en-US", {
+            timeZone: "America/New_York",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+        };
+
+        const formatDateET = (timeSec: number) => {
+          const date = new Date(timeSec * 1000);
+          const dStr = date.toLocaleDateString("en-US", {
+            timeZone: "America/New_York",
+            month: "numeric",
+            day: "numeric",
+            year: "numeric",
+          });
+          const tStr = date.toLocaleTimeString("en-US", {
+            timeZone: "America/New_York",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+          return `${dStr}, ${tStr}`;
+        };
+
         const chart = createChart(chartContainerRef.current, {
           width: chartContainerRef.current.clientWidth,
           height: 380,
@@ -896,17 +924,18 @@ export default function App() {
           },
           timeScale: {
             timeVisible: true,
-            secondsVisible: true,
+            secondsVisible: false,
             borderColor: 'rgba(255, 255, 255, 0.1)',
             rightOffset: 0,
             fixLeftEdge: true,
             fixRightEdge: true,
+            tickMarkFormatter: (timeSec: number) => formatTimeET(timeSec),
           },
           localization: {
-            timeFormatter: (ts: number) => {
-              const date = new Date(ts * 1000);
-              return date.toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour12: false });
-            }
+            timeFormatter: (timeSec: any) => {
+              const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
+              return formatDateET(ts);
+            },
           }
         });
 
@@ -1005,13 +1034,35 @@ export default function App() {
   };
 
   const periodInfo = getPeriodChangeInfo();
-  const currentStockStats = getStockStats(selectedTicker);
-  
+  const baseStats = getStockStats(selectedTicker);
   const activeKey = `${selectedTicker}_${selectedGranularity}`;
   const rawDataForStats = tickData[activeKey] || [];
+  const candleRawForStats = candleData[activeKey] || [];
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
-  const keyStats = getStockStats(selectedTicker);
+
+  let openPrice = baseStats.open;
+  let dailyHigh = baseStats.high;
+  let dailyLow = baseStats.low;
+
+  if (candleRawForStats.length > 0) {
+    openPrice = candleRawForStats[0].open;
+    dailyHigh = Math.max(...candleRawForStats.map(b => b.high));
+    dailyLow = Math.min(...candleRawForStats.map(b => b.low));
+  }
+
+  const wHigh = Math.max(dailyHigh, baseStats.wHigh);
+  const wLow = Math.min(dailyLow, baseStats.wLow);
+
+  const keyStats = {
+    ...baseStats,
+    open: openPrice,
+    high: dailyHigh,
+    low: dailyLow,
+    wHigh,
+    wLow,
+  };
+  const currentStockStats = keyStats;
   const cleanSessionLabel = marketInfo.label.replace(/^[\p{Emoji}\s●]+/u, '').trim();
   const currentExecCount = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker).length;
 
