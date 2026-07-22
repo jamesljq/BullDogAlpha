@@ -156,54 +156,196 @@ const INTERVAL_OPTIONS: IntervalOption[] = [
   { value: "12M", label: "12 months", category: "DAYS / MONTHS" },
 ];
 
-const generateMockHistory = (ticker: string, intervalSeconds: number): Array<{ time: number, value: number }> => {
-  const data: Array<{ time: number, value: number }> = [];
-  let basePrice = 150.0;
-  if (ticker === "AAPL") basePrice = 175.0;
-  else if (ticker === "MSFT") basePrice = 330.0;
-  else if (ticker === "TSLA") basePrice = 240.0;
-  else if (ticker === "AMZN") basePrice = 130.0;
-  else if (ticker === "NVDA") basePrice = 450.0;
-  else if (ticker === "GOOG") basePrice = 120.0;
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const count = 100;
-  for (let i = count; i > 0; i--) {
-    const time = nowSeconds - i * intervalSeconds;
-    basePrice += (Math.random() - 0.5) * (basePrice * 0.005);
-    data.push({ time, value: parseFloat(basePrice.toFixed(2)) });
+
+export interface StockMetadata {
+  name: string;
+  currentPrice: number;
+  open: number;
+  high: number;
+  low: number;
+  wHigh: number; // 52-Week High
+  wLow: number;  // 52-Week Low
+  pe: number;
+  volume: string;
+  marketCap: string;
+  avgVolume: string;
+}
+
+export const STOCK_DATA_MAP: Record<string, StockMetadata> = {
+  AAPL: {
+    name: 'Apple Inc.',
+    currentPrice: 224.23,
+    open: 223.50,
+    high: 225.40,
+    low: 222.80,
+    wHigh: 237.23,
+    wLow: 164.08,
+    pe: 34.2,
+    volume: '48.5M',
+    marketCap: '$3.42T',
+    avgVolume: '52.1M',
+  },
+  MSFT: {
+    name: 'Microsoft Corp.',
+    currentPrice: 448.37,
+    open: 446.10,
+    high: 450.20,
+    low: 445.50,
+    wHigh: 468.35,
+    wLow: 309.45,
+    pe: 35.8,
+    volume: '21.3M',
+    marketCap: '$3.33T',
+    avgVolume: '22.8M',
+  },
+  NVDA: {
+    name: 'NVIDIA Corp.',
+    currentPrice: 122.50,
+    open: 121.80,
+    high: 124.10,
+    low: 120.90,
+    wHigh: 140.76,
+    wLow: 45.01,
+    pe: 71.5,
+    volume: '195.4M',
+    marketCap: '$3.01T',
+    avgVolume: '210.6M',
+  },
+  TSLA: {
+    name: 'Tesla, Inc.',
+    currentPrice: 251.50,
+    open: 248.30,
+    high: 255.10,
+    low: 246.20,
+    wHigh: 271.00,
+    wLow: 138.80,
+    pe: 68.4,
+    volume: '85.2M',
+    marketCap: '$801.5B',
+    avgVolume: '92.4M',
+  },
+  AMZN: {
+    name: 'Amazon.com, Inc.',
+    currentPrice: 186.40,
+    open: 185.10,
+    high: 188.20,
+    low: 184.50,
+    wHigh: 201.20,
+    wLow: 118.35,
+    pe: 43.6,
+    volume: '38.9M',
+    marketCap: '$1.94T',
+    avgVolume: '41.2M',
+  },
+  GOOG: {
+    name: 'Alphabet Inc.',
+    currentPrice: 178.60,
+    open: 177.20,
+    high: 180.10,
+    low: 176.80,
+    wHigh: 191.75,
+    wLow: 120.21,
+    pe: 26.8,
+    volume: '24.1M',
+    marketCap: '$2.21T',
+    avgVolume: '26.5M',
+  },
+  GOOGL: {
+    name: 'Alphabet Inc.',
+    currentPrice: 178.60,
+    open: 177.20,
+    high: 180.10,
+    low: 176.80,
+    wHigh: 191.75,
+    wLow: 120.21,
+    pe: 26.8,
+    volume: '24.1M',
+    marketCap: '$2.21T',
+    avgVolume: '26.5M',
+  },
+};
+
+export const getStockStats = (ticker: string, candleRaw?: Array<{ open: number, high: number, low: number, close: number }>) => {
+  const meta = STOCK_DATA_MAP[ticker];
+  if (meta) return meta;
+  return {
+    name: ticker || 'Unknown',
+    currentPrice: 150.00,
+    open: 149.50,
+    high: 151.20,
+    low: 148.80,
+    wHigh: 180.00,
+    wLow: 120.00,
+    pe: 25.0,
+    volume: '10.0M',
+    marketCap: '$100.0B',
+    avgVolume: '12.0M',
+  };
+};
+
+export const generateMockHistory = (ticker: string, stepSec: number = 60) => {
+  const stock = getStockStats(ticker);
+  const targetPrice = stock.currentPrice;
+  const points = 100;
+  const now = Math.floor(Date.now() / 1000);
+  const data: Array<{ time: number, value: number }> = [];
+
+  let currentVal = targetPrice;
+  const values: number[] = [currentVal];
+
+  for (let i = 1; i < points; i++) {
+    const seed = (ticker.charCodeAt(0) * 17 + i * 31) % 100;
+    const delta = (Math.sin(i / 4.0) * 0.8 + (seed - 50) / 100.0) * (targetPrice * 0.002);
+    currentVal = Math.max(1.0, currentVal - delta);
+    values.unshift(parseFloat(currentVal.toFixed(2)));
   }
+
+  for (let i = 0; i < points; i++) {
+    const time = now - (points - 1 - i) * stepSec;
+    data.push({ time, value: values[i] });
+  }
+
   return data;
 };
 
-const generateMockCandles = (ticker: string, intervalSeconds: number): Array<{ time: number, open: number, high: number, low: number, close: number }> => {
+export const generateMockCandles = (ticker: string, stepSec: number = 60) => {
+  const stock = getStockStats(ticker);
+  const targetPrice = stock.currentPrice;
+  const points = 100;
+  const now = Math.floor(Date.now() / 1000);
   const data: Array<{ time: number, open: number, high: number, low: number, close: number }> = [];
-  let basePrice = 150.0;
-  if (ticker === "AAPL") basePrice = 175.0;
-  else if (ticker === "MSFT") basePrice = 330.0;
-  else if (ticker === "TSLA") basePrice = 240.0;
-  else if (ticker === "AMZN") basePrice = 130.0;
-  else if (ticker === "NVDA") basePrice = 450.0;
-  else if (ticker === "GOOG") basePrice = 120.0;
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const count = 100;
-  for (let i = count; i > 0; i--) {
-    const time = nowSeconds - i * intervalSeconds;
-    const open = basePrice + (Math.random() - 0.5) * (basePrice * 0.01);
-    const close = open + (Math.random() - 0.5) * (basePrice * 0.01);
-    const high = Math.max(open, close) + Math.random() * (basePrice * 0.005);
-    const low = Math.min(open, close) - Math.random() * (basePrice * 0.005);
+  let currentClose = targetPrice;
+  const candleList: Array<{ open: number, high: number, low: number, close: number }> = [];
+
+  for (let i = 0; i < points; i++) {
+    const isLast = (i === points - 1);
+    let close = isLast ? targetPrice : currentClose;
     
-    basePrice = close;
+    const seed = (ticker.charCodeAt(0) * 13 + (points - 1 - i) * 29) % 100;
+    const openOffset = (Math.cos(i / 3.0) * 0.5 + (seed - 50) / 100.0) * (targetPrice * 0.0015);
+    let open = isLast ? parseFloat((close - openOffset).toFixed(2)) : parseFloat((close + openOffset).toFixed(2));
+    
+    const high = parseFloat((Math.max(open, close) + Math.abs(Math.sin(i)) * 0.4 + 0.1).toFixed(2));
+    const low = parseFloat((Math.min(open, close) - Math.abs(Math.cos(i)) * 0.4 - 0.1).toFixed(2));
+
+    candleList.unshift({ open, high, low, close });
+
+    if (!isLast) {
+      const stepDelta = (Math.sin(i / 5.0) * 0.6 + (seed - 50) / 100.0) * (targetPrice * 0.002);
+      currentClose = Math.max(1.0, currentClose - stepDelta);
+    }
+  }
+
+  for (let i = 0; i < points; i++) {
+    const time = now - (points - 1 - i) * stepSec;
     data.push({
       time,
-      open: parseFloat(open.toFixed(2)),
-      high: parseFloat(high.toFixed(2)),
-      low: parseFloat(low.toFixed(2)),
-      close: parseFloat(close.toFixed(2))
+      ...candleList[i]
     });
   }
+
   return data;
 };
 
@@ -232,42 +374,6 @@ export const calculateRSI = (prices: number[]): string => {
   const rs = avgGain / avgLoss;
   const rsi = 100 - (100 / (1 + rs));
   return rsi.toFixed(2);
-};
-
-const COMPANY_NAMES: Record<string, string> = {
-  AAPL: 'Apple',
-  MSFT: 'Microsoft',
-  TSLA: 'Tesla',
-  AMZN: 'Amazon',
-  NVDA: 'NVIDIA',
-  GOOG: 'Alphabet',
-};
-
-export const getStockStats = (ticker: string, candleRaw: Array<{ open: number, high: number, low: number, close: number }>) => {
-  const name = COMPANY_NAMES[ticker] || ticker;
-  let open = 323.13;
-  let high = 334.99;
-  let low = 273.75;
-  let wHigh = 368.49;
-  let wLow = 238.56;
-  let pe = 25.4;
-
-  const bars = candleRaw || [];
-
-  if (bars.length > 0) {
-    open = bars[0].open;
-    high = Math.max(...bars.map(b => b.high));
-    low = Math.min(...bars.map(b => b.low));
-    wHigh = Math.max(high, 368.49);
-    wLow = Math.min(low, 238.56);
-  } else {
-    if (ticker === "AAPL") { open = 175.20; high = 176.50; low = 174.10; wHigh = 199.62; wLow = 164.08; pe = 31.2; }
-    else if (ticker === "MSFT") { open = 330.40; high = 332.10; low = 328.50; wHigh = 384.30; wLow = 219.35; pe = 35.8; }
-    else if (ticker === "TSLA") { open = 240.50; high = 245.80; low = 238.20; wHigh = 299.29; wLow = 152.37; pe = 72.4; }
-    else if (ticker === "AMZN") { open = 130.10; high = 131.50; low = 129.20; wHigh = 145.86; wLow = 97.71; pe = 62.1; }
-    else if (ticker === "NVDA") { open = 450.80; high = 455.20; low = 447.10; wHigh = 502.66; wLow = 140.34; pe = 110.5; }
-  }
-  return { name, open, high, low, wHigh, wLow, pe };
 };
 
 
@@ -402,9 +508,10 @@ export default function App() {
     const rawData = tickData[key] || [];
     const candleRaw = candleData[key] || [];
     const granObj = GRANULARITIES.find(g => g.value === selectedGranularity) || GRANULARITIES[0];
+    const baseStats = getStockStats(selectedTicker);
 
-    let currentPrice = 0;
-    let startPrice = 0;
+    let currentPrice = baseStats.currentPrice;
+    let startPrice = currentPrice;
 
     if (chartType === "line" && rawData.length > 0) {
       startPrice = rawData[0].value;
@@ -898,14 +1005,14 @@ export default function App() {
   };
 
   const periodInfo = getPeriodChangeInfo();
-  const currentStockStats = getStockStats(selectedTicker, []);
+  const currentStockStats = getStockStats(selectedTicker);
   
   const activeKey = `${selectedTicker}_${selectedGranularity}`;
   const rawDataForStats = tickData[activeKey] || [];
-  const candleRawForStats = candleData[activeKey] || [];
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
-  const keyStats = getStockStats(selectedTicker, candleRawForStats);
+  const keyStats = getStockStats(selectedTicker);
+  const cleanSessionLabel = marketInfo.label.replace(/^[\p{Emoji}\s●]+/u, '').trim();
   const currentExecCount = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker).length;
 
   return (
@@ -1124,7 +1231,7 @@ export default function App() {
                   marginBottom: '16px',
                 }}>
                   <span>🌙</span>
-                  <span>Off-hours session active ({marketInfo.label.replace('● ', '')}). Displaying real historical session bars from recent market open & night trading.</span>
+                  <span>Off-hours session active ({cleanSessionLabel || marketInfo.sessionType}). Displaying real historical session bars from recent market open & night trading.</span>
                 </div>
               )}
 

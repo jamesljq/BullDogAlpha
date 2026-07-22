@@ -1388,7 +1388,7 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 	if isHoliday {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    true,
-			"label":        fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName),
+			"label":        fmt.Sprintf("🎉 HOLIDAY CLOSED (%s)", holidayName),
 			"session_type": "HOLIDAY",
 			"reason":       holidayName,
 			"source":       "exchange_calendar",
@@ -1399,7 +1399,7 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    true,
-			"label":        "● WEEKEND CLOSED",
+			"label":        "🏖️ WEEKEND CLOSED",
 			"session_type": "WEEKEND",
 			"source":       "exchange_calendar",
 		})
@@ -1421,28 +1421,28 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 	if mins >= marketOpen && mins < marketClose {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    false,
-			"label":        "● REGULAR MARKET",
+			"label":        "🟢 REGULAR MARKET",
 			"session_type": "REGULAR",
 			"source":       "exchange_calendar",
 		})
 	} else if mins >= preMarketStart && mins < marketOpen {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    true,
-			"label":        "● PRE-MARKET",
+			"label":        "🌅 PRE-MARKET",
 			"session_type": "PRE_MARKET",
 			"source":       "exchange_calendar",
 		})
 	} else if mins >= marketClose && mins < extendedClose {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    true,
-			"label":        "● EXTENDED HOURS",
+			"label":        "🌆 EXTENDED HOURS",
 			"session_type": "EXTENDED",
 			"source":       "exchange_calendar",
 		})
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"is_closed":    true,
-			"label":        "● NIGHT SESSION",
+			"label":        "🌙 NIGHT SESSION",
 			"session_type": "NIGHT",
 			"source":       "exchange_calendar",
 		})

@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP } from './App';
 
 // Mock lightweight-charts
 jest.mock('lightweight-charts', () => ({
@@ -310,17 +310,50 @@ describe('Bulldog Alpha Web Console', () => {
     const rsi = calculateRSI(prices);
     expect(parseFloat(rsi)).toBeGreaterThan(0);
 
-    const stats = getStockStats('AAPL', [{ open: 300, high: 350, low: 290, close: 340 }]);
-    expect(stats.name).toBe('Apple');
+    const stats = getStockStats('AAPL');
+    expect(stats.name).toBe('Apple Inc.');
+    expect(stats.wHigh).toBe(237.23);
+    expect(stats.wLow).toBe(164.08);
 
-    const msftStats = getStockStats('MSFT', []);
-    expect(msftStats.name).toBe('Microsoft');
+    const msftStats = getStockStats('MSFT');
+    expect(msftStats.name).toBe('Microsoft Corp.');
+    expect(msftStats.wHigh).toBe(468.35);
 
     const isClosed = checkIsMarketClosed();
     expect(typeof isClosed).toBe('boolean');
 
     const sessionInfo = getMarketSessionStatus();
     expect(sessionInfo.label).toBeDefined();
+  });
+
+  test('Key Statistics & Price Invariance across Timeframes (1D, 1W, 1M, 3M, 1Y, 5Y, ALL)', async () => {
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // 52-Week High and Low elements should display exact benchmark figures ($237.23 / $164.08)
+    const highLowElement = screen.getByText('$237.23 / $164.08');
+    expect(highLowElement).toBeInTheDocument();
+
+    // Click through different timeframe buttons
+    const timeframes = ['1D', '1W', '1M', '3M', '1Y', '5Y', 'ALL'];
+    for (const tf of timeframes) {
+      const btn = screen.getByText(tf);
+      fireEvent.click(btn);
+      // Key Statistics (52-Week High / Low) MUST remain identical across all timeframes
+      expect(screen.getByText('$237.23 / $164.08')).toBeInTheDocument();
+    }
+  });
+
+  test('Tag single emoji formatting & single space spacing check', () => {
+    const session = getMarketSessionStatus();
+    expect(session.label).toMatch(/^[\p{Emoji}]\s+/u);
+    expect(session.label.split(' ').length).toBeGreaterThan(1);
   });
 
   test('Admin tab: Subscribe new ticker and view admin logs', async () => {
