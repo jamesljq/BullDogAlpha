@@ -1312,7 +1312,7 @@ export default function App() {
                         whiteSpace: 'nowrap',
                         lineHeight: 1,
                       }}>
-                        {marketInfo.label.replace('REGULAR MARKET', 'Regular').replace('AFTER-HOURS / NIGHT TRADING', 'Extended').replace('MARKET CLOSED', 'Closed')}
+                        {marketInfo.label}
                       </span>
                       {dataSourceInfo.isMock ? (
                         <span style={{
@@ -1329,7 +1329,7 @@ export default function App() {
                           whiteSpace: 'nowrap',
                           lineHeight: 1,
                         }} title="Currently displaying simulated mock bars. Configure Polygon/Alpaca API keys in Admin tab for live feeds.">
-                          <span>⚠️ Mock</span>
+                          <span>⚠️ MOCK DATA MODE</span>
                         </span>
                       ) : (
                         <>
@@ -1347,7 +1347,7 @@ export default function App() {
                             whiteSpace: 'nowrap',
                             lineHeight: 1,
                           }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
-                            <span>⚡ Real ({dataSourceInfo.source.toUpperCase()})</span>
+                            <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
                           </span>
                           {dataSourceInfo.source === "alpaca" && (
                             <span style={{
@@ -1364,7 +1364,7 @@ export default function App() {
                               whiteSpace: 'nowrap',
                               lineHeight: 1,
                             }} title="Alpaca Market Data Feed Mode (--alpaca-feed). Free accounts use IEX feed (~2-3% vol). Paid Unlimited accounts receive 100% NBBO SIP feed.">
-                              <span>📊 {alpacaFeedLabel.replace(' (Auto-Fallback 2% Vol)', ' (Auto)').replace(' (Free 2% Vol)', '').replace(' (Paid 100% NBBO)', '')}</span>
+                              <span>📊 {alpacaFeedLabel.replace(' (Auto-Fallback 2% Vol)', ' (Auto-Fallback)').replace(' (Free 2% Vol)', '').replace(' (Paid 100% NBBO)', '')}</span>
                             </span>
                           )}
                         </>

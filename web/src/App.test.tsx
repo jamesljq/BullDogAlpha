@@ -378,7 +378,7 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
     // Verify Real Live Data badge is displayed when real data is returned
-    expect(screen.getByText(/⚡ Real \(/i)).toBeInTheDocument();
+    expect(screen.getByText(/REAL LIVE DATA/i)).toBeInTheDocument();
 
     // Navigate to Admin tab and toggle Force Simulated Mock Mode
     await act(async () => {
