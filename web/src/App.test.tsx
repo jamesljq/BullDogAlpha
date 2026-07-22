@@ -648,6 +648,12 @@ describe('Bulldog Alpha Web Console', () => {
 
   test('Off-hours alert banner text dynamically reflects real vs simulated mode without contradictory statements', async () => {
     (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/market-status')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ is_closed: true, label: '● NIGHT SESSION', session_type: 'NIGHT' }),
+        });
+      }
       if (url.includes('/api/mdg/history')) {
         return Promise.resolve({
           ok: true,
@@ -670,7 +676,7 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
     // Off-hours banner must say 'Displaying simulated off-hours session bars' when is_mock is true
-    const simulatedBanner = screen.getByText(/Displaying simulated off-hours session bars/i);
+    const simulatedBanner = await screen.findByText(/Displaying simulated off-hours session bars/i);
     expect(simulatedBanner).toBeInTheDocument();
     expect(screen.queryByText(/Displaying real historical session bars/i)).not.toBeInTheDocument();
   });

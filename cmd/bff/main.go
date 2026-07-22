@@ -561,9 +561,10 @@ func (bff *BFFServer) HandleMdgControlAPI(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		Action string `json:"action"` // "pause", "resume", "set_vendor", "set_api_key"
+		Action string `json:"action"` // "pause", "resume", "set_vendor", "set_api_key", "set_alpaca_feed"
 		Vendor string `json:"vendor"` // "polygon" or "alpaca"
 		APIKey string `json:"api_key"`
+		Feed   string `json:"feed"`   // "auto", "sip", "iex"
 		URL    string `json:"url"`    // optional custom stream URL
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -602,6 +603,15 @@ func (bff *BFFServer) HandleMdgControlAPI(w http.ResponseWriter, r *http.Request
 			os.Setenv("FEED_API_KEY", req.APIKey)
 			evtPayload, _ = json.Marshal(map[string]interface{}{
 				"action": "set_api_key",
+			})
+		}
+	case "set_alpaca_feed":
+		if req.Feed != "" {
+			_ = bff.redisClient.Set(ctx, "mdg:alpaca_feed", req.Feed, 0)
+			os.Setenv("ALPACA_FEED", req.Feed)
+			evtPayload, _ = json.Marshal(map[string]interface{}{
+				"action": "set_alpaca_feed",
+				"feed":   req.Feed,
 			})
 		}
 	default:
@@ -969,7 +979,10 @@ func main() {
 	alpacaKeyID := flag.String("alpaca-key-id", "", "Alpaca API Key ID")
 	alpacaSecretKey := flag.String("alpaca-secret-key", "", "Alpaca API Secret Key")
 	vendorFlag := flag.String("vendor", "", "Market data vendor (polygon or alpaca)")
+	alpacaFeedFlag := flag.String("alpaca-feed", "auto", "Alpaca market data feed source mode: 'auto' (try SIP NBBO first with IEX fallback), 'iex' (free IEX 2-3% volume feed), 'sip' (paid 100% NBBO feed)")
 	flag.Parse()
+
+	_ = alpacaFeedFlag
 
 	feedCfg := ValidateAndResolveFeedConfig(*feedApiKey, *apiKeyFlag, *alpacaKeyID, *alpacaSecretKey, *vendorFlag, "", "")
 	if feedCfg.Error != nil {
@@ -1159,32 +1172,47 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			timeframe = "1Day"
 		}
 
-		url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=iex&start=%s&end=%s&sort=desc&limit=1000",
-			ticker, timeframe, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
-
-		req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		alpacaFeedPref := r.URL.Query().Get("alpaca_feed")
+		if alpacaFeedPref == "" {
+			alpacaFeedPref, _ = bff.redisClient.Get(r.Context(), "mdg:alpaca_feed").Result()
+		}
+		if alpacaFeedPref == "" {
+			alpacaFeedPref = os.Getenv("ALPACA_FEED")
+		}
+		if alpacaFeedPref == "" {
+			alpacaFeedPref = "auto"
 		}
 
-		req.Header.Set("APCA-API-KEY-ID", keyID)
-		req.Header.Set("APCA-API-SECRET-KEY", secretKey)
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"error":   fmt.Sprintf("Alpaca fetch failed: %v", err),
-				"bars":    []interface{}{},
-			})
-			return
+		feedToTry := "iex"
+		if alpacaFeedPref == "sip" || alpacaFeedPref == "auto" {
+			feedToTry = "sip"
 		}
-		defer resp.Body.Close()
 
-		if resp.StatusCode == http.StatusOK {
+		var activeFeedUsed string = "IEX Feed (Free 2% Vol)"
+
+		fetchAlpacaBars := func(feedParam string) ([]ClientBar, int, error) {
+			url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=%s&start=%s&end=%s&sort=desc&limit=1000",
+				ticker, timeframe, feedParam, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
+
+			req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+			if err != nil {
+				return nil, 500, err
+			}
+
+			req.Header.Set("APCA-API-KEY-ID", keyID)
+			req.Header.Set("APCA-API-SECRET-KEY", secretKey)
+
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil, 500, err
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return nil, resp.StatusCode, fmt.Errorf("http_status_%d", resp.StatusCode)
+			}
+
 			var alpacaResp struct {
 				Bars map[string][]struct {
 					T time.Time `json:"t"`
@@ -1194,20 +1222,42 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 					C float64   `json:"c"`
 				} `json:"bars"`
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&alpacaResp); err == nil {
-				tickerBars := alpacaResp.Bars[ticker]
-				for i := len(tickerBars) - 1; i >= 0; i-- {
-					b := tickerBars[i]
-					bars = append(bars, ClientBar{
-						Time:  b.T.Unix(),
-						Open:  b.O,
-						High:  b.H,
-						Low:   b.L,
-						Close: b.C,
-					})
-				}
+			if err := json.NewDecoder(resp.Body).Decode(&alpacaResp); err != nil {
+				return nil, 500, err
+			}
+
+			tickerBars := alpacaResp.Bars[ticker]
+			resBars := []ClientBar{}
+			for i := len(tickerBars) - 1; i >= 0; i-- {
+				b := tickerBars[i]
+				resBars = append(resBars, ClientBar{
+					Time:  b.T.Unix(),
+					Open:  b.O,
+					High:  b.H,
+					Low:   b.L,
+					Close: b.C,
+				})
+			}
+			return resBars, 200, nil
+		}
+
+		fetchedBars, statusCode, err := fetchAlpacaBars(feedToTry)
+		if err == nil && len(fetchedBars) > 0 {
+			bars = fetchedBars
+			if feedToTry == "sip" {
+				activeFeedUsed = "SIP Feed (Paid 100% NBBO)"
+			} else {
+				activeFeedUsed = "IEX Feed (Free 2% Vol)"
+			}
+		} else if (alpacaFeedPref == "sip" || alpacaFeedPref == "auto") && (statusCode == 403 || len(fetchedBars) == 0) {
+			// Auto Fallback to IEX for Free/Paper accounts
+			fallbackBars, _, fErr := fetchAlpacaBars("iex")
+			if fErr == nil && len(fallbackBars) > 0 {
+				bars = fallbackBars
+				activeFeedUsed = "IEX Feed (Auto-Fallback 2% Vol)"
 			}
 		}
+		r.Header.Set("X-Alpaca-Feed-Used", activeFeedUsed)
 	} else {
 		// Polygon
 		timespan := "day"
@@ -1313,12 +1363,18 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		srcName = "mock"
 	}
 
+	feedUsed := r.Header.Get("X-Alpaca-Feed-Used")
+	if feedUsed == "" {
+		feedUsed = "IEX Feed (Free 2% Vol)"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"bars":    bars,
-		"source":  srcName,
-		"is_mock": isMock,
+		"success":     true,
+		"bars":        bars,
+		"source":      srcName,
+		"is_mock":     isMock,
+		"alpaca_feed": feedUsed,
 	})
 }
 

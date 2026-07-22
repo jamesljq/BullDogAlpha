@@ -475,6 +475,8 @@ export default function App() {
   const [trades, setTrades] = useState<TradeMarker[]>([]);
   const [dataSourceInfo, setDataSourceInfo] = useState<{ isMock: boolean; source: string }>({ isMock: false, source: "polygon" });
   const [forceMockMode, setForceMockMode] = useState<boolean>(false);
+  const [alpacaFeedMode, setAlpacaFeedMode] = useState<string>("auto");
+  const [alpacaFeedLabel, setAlpacaFeedLabel] = useState<string>("IEX Feed (Free 2% Vol)");
 
   const [chartType, setChartType] = useState<"line" | "candlestick">("candlestick");
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
@@ -572,6 +574,10 @@ export default function App() {
           const isMock = data.is_mock ?? (data.source === "mock");
           const sourceName = data.source || (isMock ? "mock" : activeVendor);
           setDataSourceInfo({ isMock: !!isMock, source: sourceName });
+
+          if (data.alpaca_feed) {
+            setAlpacaFeedLabel(data.alpaca_feed);
+          }
 
           if (isMock) {
             addLog(`Loaded simulated mock historical bars for ${ticker} (${granularity}, ${interval})`);
@@ -885,6 +891,25 @@ export default function App() {
       }
     } catch (err) {
       addLog(`Failed to save API Key: ${err}`);
+    }
+  };
+
+  const selectAlpacaFeed = async (mode: string) => {
+    try {
+      const resp = await fetch("/api/mdg/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_alpaca_feed", feed: mode }),
+      });
+      if (resp.ok) {
+        setAlpacaFeedMode(mode);
+        addLog(`Alpaca feed mode set to: ${mode.toUpperCase()}`);
+        if (selectedTicker) {
+          fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+        }
+      }
+    } catch (err) {
+      addLog(`Failed to switch Alpaca feed mode: ${err}`);
     }
   };
 
@@ -1358,20 +1383,38 @@ export default function App() {
                           <span>⚠️ MOCK DATA MODE</span>
                         </span>
                       ) : (
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          padding: '3px 9px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(48, 209, 88, 0.15)',
-                          color: '#30d158',
-                          border: '1px solid rgba(48, 209, 88, 0.35)',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
-                          <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
-                        </span>
+                        <>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '3px 9px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(48, 209, 88, 0.15)',
+                            color: '#30d158',
+                            border: '1px solid rgba(48, 209, 88, 0.35)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
+                            <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
+                          </span>
+                          {dataSourceInfo.source === "alpaca" && (
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '3px 9px',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(10, 132, 255, 0.15)',
+                              color: '#0a84ff',
+                              border: '1px solid rgba(10, 132, 255, 0.35)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }} title="Alpaca Market Data Feed Mode (--alpaca-feed). Free accounts use IEX feed (~2-3% vol). Paid Unlimited accounts receive 100% NBBO SIP feed.">
+                              <span>📊 {alpacaFeedLabel}</span>
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
 
@@ -1725,6 +1768,72 @@ export default function App() {
                       Save Key
                     </button>
                   </div>
+
+                  {activeVendor === "alpaca" && (
+                    <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed rgba(255, 255, 255, 0.1)' }}>
+                      <span style={styles.ctrlLabel}>Alpaca Market Data Feed Mode (--alpaca-feed):</span>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          className="apple-btn"
+                          onClick={() => selectAlpacaFeed("auto")}
+                          style={{
+                            ...styles.actionBtn,
+                            backgroundColor: alpacaFeedMode === "auto" ? "#0a84ff" : "rgba(255,255,255,0.05)",
+                            border: alpacaFeedMode === "auto" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                            color: alpacaFeedMode === "auto" ? "#ffffff" : "#aeaeb2",
+                          }}
+                          title="Auto Mode: Tries SIP NBBO feed first; automatically falls back to IEX for free paper keys"
+                        >
+                          🔄 Auto (SIP ➔ IEX Fallback)
+                        </button>
+                        <button
+                          className="apple-btn"
+                          onClick={() => selectAlpacaFeed("sip")}
+                          style={{
+                            ...styles.actionBtn,
+                            backgroundColor: alpacaFeedMode === "sip" ? "#30d158" : "rgba(255,255,255,0.05)",
+                            border: alpacaFeedMode === "sip" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                            color: alpacaFeedMode === "sip" ? "#ffffff" : "#aeaeb2",
+                          }}
+                          title="SIP Feed: Requires Alpaca Unlimited Subscription ($99/mo). 100% US Stock Volume & Real-time NBBO."
+                        >
+                          ⚡ SIP Feed (Paid 100% NBBO)
+                        </button>
+                        <button
+                          className="apple-btn"
+                          onClick={() => selectAlpacaFeed("iex")}
+                          style={{
+                            ...styles.actionBtn,
+                            backgroundColor: alpacaFeedMode === "iex" ? "#ff9f0a" : "rgba(255,255,255,0.05)",
+                            border: alpacaFeedMode === "iex" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                            color: alpacaFeedMode === "iex" ? "#ffffff" : "#aeaeb2",
+                          }}
+                          title="IEX Feed: Included with all Alpaca Free / Paper accounts. ~2-3% of total US stock volume."
+                        >
+                          🆓 IEX Feed (Free 2% Vol)
+                        </button>
+                      </div>
+
+                      {/* Educational Callout */}
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(10, 132, 255, 0.08)',
+                        border: '1px solid rgba(10, 132, 255, 0.2)',
+                        fontSize: '12px',
+                        lineHeight: '1.6',
+                        color: '#d1d1d6',
+                      }}>
+                        <div style={{ fontWeight: 700, color: '#0a84ff', marginBottom: '4px' }}>
+                          ℹ️ Alpaca Market Data Feed Explained:
+                        </div>
+                        <div>• <strong>IEX Feed (Free)</strong>: Included in all Alpaca Paper/Free accounts. Captures ~2-3% of US stock volume. Ideal for dev, UI testing, and personal paper trading.</div>
+                        <div>• <strong>SIP Feed (Paid)</strong>: Requires Alpaca Unlimited Plan ($99/mo). Captures 100% of US volume across all 16+ exchanges with real-time NBBO.</div>
+                        <div>• <strong>Auto Mode (Default)</strong>: Automatically tries SIP first; if un-subscribed, seamlessly falls back to IEX to prevent 403 errors.</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div style={styles.ctrlGroup}>
