@@ -1414,6 +1414,42 @@ func TestHandleMdgHistoryAPI_Granularities(t *testing.T) {
 	}
 }
 
+func TestValidateAndResolveFeedConfig(t *testing.T) {
+	// Case 1: Flag Mismatch - alpacaKeyID given without secret
+	cfg1 := ValidateAndResolveFeedConfig("", "", "MY_KEY_ID", "", "", "", "")
+	if cfg1.Error == nil {
+		t.Errorf("expected error when alpacaSecretKey is missing")
+	}
+
+	// Case 2: Pair provided -> Auto detect vendor=alpaca & key=ID:SECRET
+	cfg2 := ValidateAndResolveFeedConfig("", "", "MY_KEY_ID", "MY_SECRET", "", "", "")
+	if cfg2.Error != nil || cfg2.Vendor != "alpaca" || cfg2.ApiKey != "MY_KEY_ID:MY_SECRET" {
+		t.Errorf("unexpected resolved config: %+v", cfg2)
+	}
+
+	// Case 3: Polygon single key provided -> Auto detect vendor=polygon
+	cfg3 := ValidateAndResolveFeedConfig("polygon_single_key", "", "", "", "", "", "")
+	if cfg3.Error != nil || cfg3.Vendor != "polygon" || cfg3.ApiKey != "polygon_single_key" {
+		t.Errorf("unexpected resolved config for polygon: %+v", cfg3)
+	}
+
+	// Case 4: Alpaca vendor with non-colon key -> Return format error
+	cfg4 := ValidateAndResolveFeedConfig("single_key_no_colon", "", "", "", "alpaca", "", "")
+	if cfg4.Error == nil {
+		t.Errorf("expected invalid_key_format error for alpaca with single token key")
+	}
+
+	// Case 5: Fallback to APCA environment variables
+	os.Setenv("APCA_API_KEY_ID", "ENV_KEY_ID")
+	os.Setenv("APCA_API_SECRET_KEY", "ENV_SECRET_KEY")
+	cfg5 := ValidateAndResolveFeedConfig("", "", "", "", "", "", "")
+	if cfg5.Error != nil || cfg5.Vendor != "alpaca" || cfg5.ApiKey != "ENV_KEY_ID:ENV_SECRET_KEY" {
+		t.Errorf("unexpected env fallback config: %+v", cfg5)
+	}
+	os.Unsetenv("APCA_API_KEY_ID")
+	os.Unsetenv("APCA_API_SECRET_KEY")
+}
+
 
 
 

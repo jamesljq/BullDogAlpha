@@ -851,6 +851,75 @@ func runBFF(ctx context.Context, cfg Config) error {
 
 var runBFFHook = runBFF
 
+type FeedConfig struct {
+	ApiKey string
+	Vendor string
+	Error  error
+}
+
+func ValidateAndResolveFeedConfig(feedApiKey, apiKeyFlag, alpacaKeyID, alpacaSecretKey, vendorFlag string, redisKey, redisVendor string) FeedConfig {
+	if (alpacaKeyID != "" && alpacaSecretKey == "") || (alpacaKeyID == "" && alpacaSecretKey != "") {
+		return FeedConfig{
+			Error: fmt.Errorf("invalid_flags: --alpaca-key-id and --alpaca-secret-key must both be provided together"),
+		}
+	}
+
+	key := feedApiKey
+	if key == "" {
+		key = apiKeyFlag
+	}
+	if key == "" && alpacaKeyID != "" && alpacaSecretKey != "" {
+		key = alpacaKeyID + ":" + alpacaSecretKey
+	}
+
+	if key == "" {
+		key = os.Getenv("FEED_API_KEY")
+	}
+	if key == "" {
+		apcaKey := os.Getenv("APCA_API_KEY_ID")
+		apcaSecret := os.Getenv("APCA_API_SECRET_KEY")
+		if apcaKey != "" && apcaSecret != "" {
+			key = apcaKey + ":" + apcaSecret
+		}
+	}
+	if key == "" {
+		alpKey := os.Getenv("ALPACA_API_KEY_ID")
+		alpSecret := os.Getenv("ALPACA_API_SECRET_KEY")
+		if alpKey != "" && alpSecret != "" {
+			key = alpKey + ":" + alpSecret
+		}
+	}
+
+	if key == "" {
+		key = redisKey
+	}
+
+	vendor := vendorFlag
+	if vendor == "" {
+		if strings.Contains(key, ":") {
+			vendor = "alpaca"
+		} else if key != "" {
+			vendor = "polygon"
+		} else if redisVendor != "" {
+			vendor = redisVendor
+		} else {
+			vendor = "polygon"
+		}
+	}
+
+	if vendor == "alpaca" && key != "" && !strings.Contains(key, ":") {
+		return FeedConfig{
+			Error: fmt.Errorf("invalid_key_format: Alpaca API key must be in KEY_ID:SECRET_KEY format"),
+		}
+	}
+
+	return FeedConfig{
+		ApiKey: key,
+		Vendor: vendor,
+		Error:  nil,
+	}
+}
+
 func main() {
 	port := flag.String("port", "8080", "BFF server port")
 	redisAddr := flag.String("redis-addr", "localhost:6379", "Redis connection address")
@@ -866,15 +935,11 @@ func main() {
 	vendorFlag := flag.String("vendor", "", "Market data vendor (polygon or alpaca)")
 	flag.Parse()
 
-	resolvedKey := *feedApiKey
-	if resolvedKey == "" {
-		resolvedKey = *apiKeyFlag
-	}
-	if resolvedKey == "" && *alpacaKeyID != "" && *alpacaSecretKey != "" {
-		resolvedKey = *alpacaKeyID + ":" + *alpacaSecretKey
-	}
-	if resolvedKey != "" {
-		os.Setenv("FEED_API_KEY", resolvedKey)
+	feedCfg := ValidateAndResolveFeedConfig(*feedApiKey, *apiKeyFlag, *alpacaKeyID, *alpacaSecretKey, *vendorFlag, "", "")
+	if feedCfg.Error != nil {
+		slog.Error("feed_config_validation_failed", "error", feedCfg.Error)
+	} else if feedCfg.ApiKey != "" {
+		os.Setenv("FEED_API_KEY", feedCfg.ApiKey)
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -895,15 +960,10 @@ func main() {
 		DevMode:    *devMode,
 	}
 
-	if resolvedKey != "" && strings.Contains(resolvedKey, ":") {
-		// Set active vendor to alpaca in Redis if Alpaca key provided via flags
+	if feedCfg.ApiKey != "" {
 		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
-		_ = rdb.Set(context.Background(), "mdg:vendor", "alpaca", 0)
-		_ = rdb.Set(context.Background(), "mdg:api_key", resolvedKey, 0)
-		rdb.Close()
-	} else if *vendorFlag != "" {
-		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
-		_ = rdb.Set(context.Background(), "mdg:vendor", *vendorFlag, 0)
+		_ = rdb.Set(context.Background(), "mdg:vendor", feedCfg.Vendor, 0)
+		_ = rdb.Set(context.Background(), "mdg:api_key", feedCfg.ApiKey, 0)
 		rdb.Close()
 	}
 
