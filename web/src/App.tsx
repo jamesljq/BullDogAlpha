@@ -15,13 +15,95 @@ interface SystemStatusMsg {
   dev_mode?: boolean;
 }
 
-interface TradeMarker {
+export interface TradeMarker {
   symbol: string;
   price: number;
-  qty: number;
+  qty?: number;
   action: "BUY" | "SELL";
   timestamp: number; // epoch ms
 }
+
+export interface FormattedMarker {
+  time: number;
+  position: 'belowBar' | 'aboveBar';
+  color: string;
+  shape: 'circle';
+  size: number;
+  text: string;
+}
+
+export const aggregateTradeMarkers = (
+  trades: TradeMarker[],
+  symbol: string,
+  candles?: Array<{ time: number }>
+): FormattedMarker[] => {
+  const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === symbol);
+  if (symbolTrades.length === 0) return [];
+
+  const sortedCandles = Array.isArray(candles) ? [...candles].sort((a, b) => a.time - b.time) : [];
+  const grouped: Record<string, TradeMarker[]> = {};
+
+  for (const t of symbolTrades) {
+    const tradeSec = Math.floor(t.timestamp / 1000);
+    let mappedTime = tradeSec;
+
+    if (sortedCandles.length > 0) {
+      let matchedCandleTime = sortedCandles[0].time;
+      for (let i = 0; i < sortedCandles.length; i++) {
+        if (sortedCandles[i].time <= tradeSec) {
+          matchedCandleTime = sortedCandles[i].time;
+        } else {
+          break;
+        }
+      }
+      mappedTime = matchedCandleTime;
+    }
+
+    const key = `${mappedTime}_${t.action}`;
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(t);
+  }
+
+  const result: FormattedMarker[] = [];
+
+  for (const key of Object.keys(grouped)) {
+    const groupTrades = grouped[key];
+    if (groupTrades.length === 0) continue;
+
+    const parts = key.split('_');
+    const time = parseInt(parts[0], 10);
+    const action = parts[1];
+    const count = groupTrades.length;
+
+    let totalQty = 0;
+    let totalVal = 0;
+    for (const gt of groupTrades) {
+      const qty = gt.qty && gt.qty > 0 ? gt.qty : 100;
+      totalQty += qty;
+      totalVal += gt.price * qty;
+    }
+    const avgPrice = totalQty > 0 ? totalVal / totalQty : groupTrades[0].price;
+    const isBuy = action === 'BUY';
+
+    const text = count === 1
+      ? `${isBuy ? 'B' : 'S'} ${totalQty}@${avgPrice.toFixed(2)}`
+      : `${isBuy ? 'B' : 'S'} ${count}x (${totalQty}@${avgPrice.toFixed(2)})`;
+
+    result.push({
+      time,
+      position: isBuy ? 'belowBar' : 'aboveBar',
+      color: isBuy ? '#30d158' : '#ff453a',
+      shape: 'circle',
+      size: count > 1 ? 1.0 : 0.8,
+      text,
+    });
+  }
+
+  result.sort((a, b) => a.time - b.time);
+  return result;
+};
 
 export interface MarketSessionInfo {
   isClosed: boolean;
@@ -1096,16 +1178,8 @@ export default function App() {
           seriesMarkersRef.current.setMarkers([]);
         }
       } else {
-        const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker);
-        const markers = symbolTrades.map(t => ({
-          time: Math.floor(t.timestamp / 1000),
-          position: (t.action === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
-          color: t.action === 'BUY' ? '#30d158' : '#ff453a',
-          shape: 'circle' as 'circle',
-          size: 0.8,
-          text: `${t.action === 'BUY' ? 'B' : 'S'} $${t.price.toFixed(2)}`,
-        }));
-        markers.sort((a, b) => a.time - b.time);
+        const currentCandles = candleData[key] || [];
+        const markers = aggregateTradeMarkers(trades, selectedTicker, currentCandles);
         if (seriesMarkersRef.current) {
           seriesMarkersRef.current.setMarkers(markers);
         }
@@ -1296,80 +1370,82 @@ export default function App() {
               {/* Robinhood Stock Title & Price Header */}
               {selectedTicker && (
                 <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}>
-                      <h2 style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: 0, letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
-                        {currentStockStats.name} ({selectedTicker})
-                      </h2>
+                  {/* Status Badges Row above Stock Title */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'nowrap' }} data-testid="header-status-tags-bar">
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      backgroundColor: marketInfo.badgeBg,
+                      color: marketInfo.badgeColor,
+                      border: `1px solid ${marketInfo.badgeBorder}`,
+                      whiteSpace: 'nowrap',
+                      lineHeight: 1,
+                    }}>
+                      {marketInfo.label}
+                    </span>
+                    {dataSourceInfo.isMock ? (
                       <span style={{
                         fontSize: '11px',
-                        fontWeight: 600,
+                        fontWeight: 700,
                         padding: '3px 8px',
                         borderRadius: '12px',
-                        backgroundColor: marketInfo.badgeBg,
-                        color: marketInfo.badgeColor,
-                        border: `1px solid ${marketInfo.badgeBorder}`,
+                        backgroundColor: 'rgba(255, 159, 10, 0.15)',
+                        color: '#ff9f0a',
+                        border: '1px solid rgba(255, 159, 10, 0.35)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
                         whiteSpace: 'nowrap',
                         lineHeight: 1,
-                      }}>
-                        {marketInfo.label}
+                      }} title="Currently displaying simulated mock bars. Configure Polygon/Alpaca API keys in Admin tab for live feeds.">
+                        <span>⚠️ MOCK DATA MODE</span>
                       </span>
-                      {dataSourceInfo.isMock ? (
+                    ) : (
+                      <>
                         <span style={{
                           fontSize: '11px',
                           fontWeight: 700,
                           padding: '3px 8px',
                           borderRadius: '12px',
-                          backgroundColor: 'rgba(255, 159, 10, 0.15)',
-                          color: '#ff9f0a',
-                          border: '1px solid rgba(255, 159, 10, 0.35)',
+                          backgroundColor: 'rgba(48, 209, 88, 0.15)',
+                          color: '#30d158',
+                          border: '1px solid rgba(48, 209, 88, 0.35)',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '4px',
                           whiteSpace: 'nowrap',
                           lineHeight: 1,
-                        }} title="Currently displaying simulated mock bars. Configure Polygon/Alpaca API keys in Admin tab for live feeds.">
-                          <span>⚠️ MOCK DATA MODE</span>
+                        }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
+                          <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
                         </span>
-                      ) : (
-                        <>
+                        {dataSourceInfo.source === "alpaca" && (
                           <span style={{
                             fontSize: '11px',
                             fontWeight: 700,
                             padding: '3px 8px',
                             borderRadius: '12px',
-                            backgroundColor: 'rgba(48, 209, 88, 0.15)',
-                            color: '#30d158',
-                            border: '1px solid rgba(48, 209, 88, 0.35)',
+                            backgroundColor: 'rgba(10, 132, 255, 0.15)',
+                            color: '#0a84ff',
+                            border: '1px solid rgba(10, 132, 255, 0.35)',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px',
                             whiteSpace: 'nowrap',
                             lineHeight: 1,
-                          }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
-                            <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
+                          }} title="Alpaca Market Data Feed Mode (--alpaca-feed). Free accounts use IEX feed (~2-3% vol). Paid Unlimited accounts receive 100% NBBO SIP feed.">
+                            <span>📊 {alpacaFeedLabel.replace(' (Auto-Fallback 2% Vol)', ' (Auto-Fallback)').replace(' (Free 2% Vol)', '').replace(' (Paid 100% NBBO)', '')}</span>
                           </span>
-                          {dataSourceInfo.source === "alpaca" && (
-                            <span style={{
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              padding: '3px 8px',
-                              borderRadius: '12px',
-                              backgroundColor: 'rgba(10, 132, 255, 0.15)',
-                              color: '#0a84ff',
-                              border: '1px solid rgba(10, 132, 255, 0.35)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              whiteSpace: 'nowrap',
-                              lineHeight: 1,
-                            }} title="Alpaca Market Data Feed Mode (--alpaca-feed). Free accounts use IEX feed (~2-3% vol). Paid Unlimited accounts receive 100% NBBO SIP feed.">
-                              <span>📊 {alpacaFeedLabel.replace(' (Auto-Fallback 2% Vol)', ' (Auto-Fallback)').replace(' (Free 2% Vol)', '').replace(' (Paid 100% NBBO)', '')}</span>
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: 0, letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
+                      {currentStockStats.name} ({selectedTicker})
+                    </h2>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <button

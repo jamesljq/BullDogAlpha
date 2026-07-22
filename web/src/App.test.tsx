@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP, aggregateTradeMarkers, TradeMarker } from './App';
 
 // Mock lightweight-charts
 jest.mock('lightweight-charts', () => ({
@@ -751,5 +751,47 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
     expect(screen.getByText(/Cleared all simulated trade execution markers/i)).toBeInTheDocument();
+  });
+
+  test('aggregateTradeMarkers formats Futu-style qty@price text and merges multiple trades on identical candle timestamps', () => {
+    const candles = [
+      { time: 1000 },
+      { time: 2000 },
+    ];
+    const trades: TradeMarker[] = [
+      { symbol: 'AAPL', price: 325.0, qty: 100, action: 'BUY', timestamp: 1000000 }, // candle 1000
+      { symbol: 'AAPL', price: 326.0, qty: 200, action: 'BUY', timestamp: 1050000 }, // candle 1000
+      { symbol: 'AAPL', price: 330.0, qty: 50, action: 'SELL', timestamp: 2000000 },  // candle 2000
+    ];
+
+    const markers = aggregateTradeMarkers(trades, 'AAPL', candles);
+    expect(markers).toHaveLength(2);
+
+    // Candle 1000 (merged 2 BUY trades: 100@325 + 200@326 = 300 total qty, avg price 325.67)
+    expect(markers[0].time).toBe(1000);
+    expect(markers[0].position).toBe('belowBar');
+    expect(markers[0].color).toBe('#30d158');
+    expect(markers[0].text).toBe('B 2x (300@325.67)');
+
+    // Candle 2000 (single SELL trade: 50@330)
+    expect(markers[1].time).toBe(2000);
+    expect(markers[1].position).toBe('aboveBar');
+    expect(markers[1].color).toBe('#ff453a');
+    expect(markers[1].text).toBe('S 50@330.00');
+  });
+
+  test('Status badges container is rendered in header-status-tags-bar above stock title', async () => {
+    (global as any).fetch = jest.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+    }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const tagsBar = screen.getByTestId('header-status-tags-bar');
+    expect(tagsBar).toBeInTheDocument();
+    expect(tagsBar).toHaveTextContent(/REGULAR MARKET/i);
   });
 });
