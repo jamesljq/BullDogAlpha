@@ -859,7 +859,23 @@ func main() {
 	emsAddr := flag.String("ems-addr", "localhost:50052", "EMS gRPC address")
 	engineAddr := flag.String("engine-addr", "localhost:50054", "Alpha Engine mock gRPC address")
 	devMode := flag.Bool("dev-mode", false, "Enable developer mode controls")
+	feedApiKey := flag.String("feed-api-key", "", "Market data feed API key (Polygon key or Alpaca KEY_ID:SECRET)")
+	apiKeyFlag := flag.String("api-key", "", "Market data feed API key")
+	alpacaKeyID := flag.String("alpaca-key-id", "", "Alpaca API Key ID")
+	alpacaSecretKey := flag.String("alpaca-secret-key", "", "Alpaca API Secret Key")
+	vendorFlag := flag.String("vendor", "", "Market data vendor (polygon or alpaca)")
 	flag.Parse()
+
+	resolvedKey := *feedApiKey
+	if resolvedKey == "" {
+		resolvedKey = *apiKeyFlag
+	}
+	if resolvedKey == "" && *alpacaKeyID != "" && *alpacaSecretKey != "" {
+		resolvedKey = *alpacaKeyID + ":" + *alpacaSecretKey
+	}
+	if resolvedKey != "" {
+		os.Setenv("FEED_API_KEY", resolvedKey)
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -877,6 +893,18 @@ func main() {
 		EmsAddr:    *emsAddr,
 		EngineAddr: *engineAddr,
 		DevMode:    *devMode,
+	}
+
+	if resolvedKey != "" && strings.Contains(resolvedKey, ":") {
+		// Set active vendor to alpaca in Redis if Alpaca key provided via flags
+		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
+		_ = rdb.Set(context.Background(), "mdg:vendor", "alpaca", 0)
+		_ = rdb.Set(context.Background(), "mdg:api_key", resolvedKey, 0)
+		rdb.Close()
+	} else if *vendorFlag != "" {
+		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
+		_ = rdb.Set(context.Background(), "mdg:vendor", *vendorFlag, 0)
+		rdb.Close()
 	}
 
 	if err := runBFFHook(ctx, cfg); err != nil {
@@ -900,6 +928,20 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 
 	forceMock := r.URL.Query().Get("mode") == "mock" || r.URL.Query().Get("mock") == "true"
 	apiKey := os.Getenv("FEED_API_KEY")
+	if apiKey == "" {
+		apcaKey := os.Getenv("APCA_API_KEY_ID")
+		apcaSecret := os.Getenv("APCA_API_SECRET_KEY")
+		if apcaKey != "" && apcaSecret != "" {
+			apiKey = apcaKey + ":" + apcaSecret
+		}
+	}
+	if apiKey == "" {
+		alpKey := os.Getenv("ALPACA_API_KEY_ID")
+		alpSecret := os.Getenv("ALPACA_API_SECRET_KEY")
+		if alpKey != "" && alpSecret != "" {
+			apiKey = alpKey + ":" + alpSecret
+		}
+	}
 	if apiKey == "" {
 		apiKey, _ = bff.redisClient.Get(r.Context(), "mdg:api_key").Result()
 	}

@@ -1467,7 +1467,7 @@ export default function App() {
                   marginBottom: '16px',
                 }}>
                   <span>🌙</span>
-                  <span>Off-hours session active ({cleanSessionLabel || marketInfo.sessionType}). Displaying real historical session bars from recent market open & night trading.</span>
+                  <span>Off-hours session active ({cleanSessionLabel || marketInfo.sessionType}). {dataSourceInfo.isMock ? 'Displaying simulated off-hours session bars.' : 'Displaying real historical session bars from recent market open & night trading.'}</span>
                 </div>
               )}
 
