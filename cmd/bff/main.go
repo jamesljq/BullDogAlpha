@@ -1159,7 +1159,7 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			timeframe = "1Day"
 		}
 
-		url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&start=%s&end=%s&sort=desc&limit=1000",
+		url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=iex&start=%s&end=%s&sort=desc&limit=1000",
 			ticker, timeframe, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
 
 		req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
