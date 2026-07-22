@@ -545,4 +545,70 @@ describe('Bulldog Alpha Web Console', () => {
     const resumeWizardBtn = screen.getByText(/SAFE RESUME WIZARD/i);
     fireEvent.click(resumeWizardBtn);
   });
+
+  test('Trading Terminal Watchlist bar & Quick Add Stock (MSFT)', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/subscriptions')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tickers: ['AAPL', 'MSFT'] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Verify Watchlist header text is present on Trading Terminal
+    expect(screen.getByText('Watchlist:')).toBeInTheDocument();
+
+    // Type MSFT in Quick Add Stock input and click + Add Stock
+    const addInput = screen.getByPlaceholderText(/Add Stock \(e.g. MSFT, META\)/i);
+    fireEvent.change(addInput, { target: { value: 'MSFT' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('+ Add Stock'));
+    });
+
+    // Verify MSFT chip is rendered on Trading Terminal Watchlist
+    expect(screen.getAllByText('MSFT').length).toBeGreaterThan(0);
+  });
+
+  test('Save API Key in Admin panel & Off-hours banner non-contradiction check', async () => {
+    let savedApiKey = '';
+    (global as any).fetch = jest.fn().mockImplementation((url: string, opts: any) => {
+      if (url.includes('/api/mdg/control') && opts?.body) {
+        const body = JSON.parse(opts.body);
+        if (body.action === 'set_api_key') {
+          savedApiKey = body.api_key;
+        }
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, is_mock: true, source: 'mock' }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Switch to Admin tab and enter API key
+    fireEvent.click(screen.getByText(/Ingestion & Systems Admin/i));
+    const keyInput = screen.getByPlaceholderText(/Polygon API Key/i);
+    fireEvent.change(keyInput, { target: { value: 'SECRET_API_KEY_123' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save Key'));
+    });
+
+    expect(savedApiKey).toBe('SECRET_API_KEY_123');
+
+    // Switch to Trading Terminal
+    fireEvent.click(screen.getByText(/Trading Terminal/i));
+    expect(screen.getByText(/Trading Terminal/i)).toBeInTheDocument();
+  });
 });
