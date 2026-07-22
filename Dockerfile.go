@@ -10,6 +10,7 @@ COPY bin/${SERVICE_NAME} /app/service
 
 # Copy the cmd directory to stage any runtime data files (e.g. Lua scripts)
 COPY cmd/ /app/cmd/
+COPY local.flags* /app/
 
 # Expose ports for EMS (50052), RiskNode (50051), MDG (50053), BFF (8080)
 EXPOSE 8080 50051 50052 50053

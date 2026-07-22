@@ -857,6 +857,32 @@ type FeedConfig struct {
 	Error  error
 }
 
+func readLocalFlagsFile() (key string, vendor string) {
+	paths := []string{"local.flags", "../local.flags", "/app/local.flags", "./local.flags"}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "--feed_api_key=") {
+					key = strings.TrimPrefix(line, "--feed_api_key=")
+				} else if strings.HasPrefix(line, "--feed-api-key=") {
+					key = strings.TrimPrefix(line, "--feed-api-key=")
+				} else if strings.HasPrefix(line, "--feed_vendor=") {
+					vendor = strings.TrimPrefix(line, "--feed_vendor=")
+				} else if strings.HasPrefix(line, "--feed-vendor=") {
+					vendor = strings.TrimPrefix(line, "--feed-vendor=")
+				}
+			}
+			if key != "" {
+				return key, vendor
+			}
+		}
+	}
+	return key, vendor
+}
+
 func ValidateAndResolveFeedConfig(feedApiKey, apiKeyFlag, alpacaKeyID, alpacaSecretKey, vendorFlag string, redisKey, redisVendor string) FeedConfig {
 	if (alpacaKeyID != "" && alpacaSecretKey == "") || (alpacaKeyID == "" && alpacaSecretKey != "") {
 		return FeedConfig{
@@ -887,6 +913,16 @@ func ValidateAndResolveFeedConfig(feedApiKey, apiKeyFlag, alpacaKeyID, alpacaSec
 		alpSecret := os.Getenv("ALPACA_API_SECRET_KEY")
 		if alpKey != "" && alpSecret != "" {
 			key = alpKey + ":" + alpSecret
+		}
+	}
+
+	if key == "" {
+		fKey, fVendor := readLocalFlagsFile()
+		if fKey != "" {
+			key = fKey
+			if vendorFlag == "" && fVendor != "" {
+				vendorFlag = fVendor
+			}
 		}
 	}
 
