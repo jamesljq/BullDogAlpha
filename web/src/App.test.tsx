@@ -877,4 +877,43 @@ describe('Bulldog Alpha Web Console', () => {
     expect(screen.queryByText('$150.00')).not.toBeInTheDocument();
     expect(screen.getAllByText('--.--').length).toBeGreaterThan(0);
   });
+
+  test('Changing granularity or bar interval dropdown re-triggers fitContent once new dataset populates', async () => {
+    mockFitContent.mockClear();
+
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/history')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            is_mock: false,
+            source: 'alpaca',
+            bars: [{ time: 1000, open: 100, high: 110, low: 90, close: 105 }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const initialCallCount = mockFitContent.mock.calls.length;
+
+    // Click 1W timeframe button to change granularity
+    const weekBtn = screen.getByText('1W');
+    await act(async () => {
+      fireEvent.click(weekBtn);
+    });
+
+    // When 1W data populates, fitContent must be called again to fit the new timeframe view!
+    await waitFor(() => {
+      expect(mockFitContent.mock.calls.length).toBeGreaterThan(initialCallCount);
+    });
+  });
 });
