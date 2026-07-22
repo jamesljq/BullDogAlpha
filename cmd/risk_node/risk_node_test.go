@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -384,6 +385,42 @@ func TestRiskInterceptorInvalidLuaResponse(t *testing.T) {
 	orderResp := resp.(*order.OrderResponse)
 	if orderResp.Reason != "RISK_NODE_FAIL_CLOSED: invalid lua response format" {
 		t.Errorf("expected invalid lua response format error, got: %s", orderResp.Reason)
+	}
+}
+
+func TestServerRPCs(t *testing.T) {
+	srv := &Server{}
+	subResp, err := srv.SubmitOrder(context.Background(), &order.OrderRequest{OrderId: "s-1", CorrelationId: "c-1"})
+	if err != nil || subResp.Status != order.OrderStatus_SUBMITTED {
+		t.Errorf("SubmitOrder failed: %v", err)
+	}
+
+	canResp, err := srv.CancelOrder(context.Background(), &order.CancelOrderRequest{OrderId: "c-1", CorrelationId: "c-1"})
+	if err != nil || canResp.Status != order.OrderStatus_CANCELED {
+		t.Errorf("CancelOrder failed: %v", err)
+	}
+}
+
+func TestRunRiskNode(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	luaFile := "test_risk_check.lua"
+	_ = os.WriteFile(luaFile, []byte(LuaCheckScript), 0644)
+	defer os.Remove(luaFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	err = runRiskNode(ctx, mr.Addr(), "0", "0", luaFile, 50000.0)
+	if err != nil {
+		t.Fatalf("runRiskNode failed: %v", err)
 	}
 }
 

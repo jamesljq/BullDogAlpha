@@ -1245,6 +1245,124 @@ func TestBFFMainExitFailure(t *testing.T) {
 	main()
 }
 
+func TestHandleMdgHistoryAPI_Intervals(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed to start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rClient.Close()
+
+	bff := NewBFFServer(rClient, mr.Addr(), "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+
+	intervals := []string{"10s", "15s", "30s", "1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M", "6M", "12M"}
+	for _, iv := range intervals {
+		req := httptest.NewRequest("GET", "/api/mdg/history?ticker=AAPL&granularity=1D&interval="+iv, nil)
+		rec := httptest.NewRecorder()
+
+		bff.HandleMdgHistoryAPI(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for interval %s, got %d", iv, rec.Code)
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse JSON response for interval %s: %v", iv, err)
+		}
+
+		if resp["success"] != true {
+			t.Errorf("expected success: true for interval %s", iv)
+		}
+
+		bars, ok := resp["bars"].([]interface{})
+		if !ok || len(bars) == 0 {
+			t.Errorf("expected non-empty bars for interval %s", iv)
+		}
+	}
+}
+
+func TestHandleMdgHistoryAPI_MissingTicker(t *testing.T) {
+	bff := NewBFFServer(nil, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+	req := httptest.NewRequest("GET", "/api/mdg/history", nil)
+	rec := httptest.NewRecorder()
+	bff.HandleMdgHistoryAPI(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", rec.Code)
+	}
+}
+
+func TestHandleMdgHistoryAPI_WithApiKey(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rClient.Close()
+	bff := NewBFFServer(rClient, mr.Addr(), "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+
+	// Set Alpaca vendor
+	_ = rClient.Set(context.Background(), "mdg:vendor", "alpaca", 0).Err()
+
+	// Invalid key format for Alpaca
+	os.Setenv("FEED_API_KEY", "invalid_key_format")
+	req := httptest.NewRequest("GET", "/api/mdg/history?ticker=AAPL&granularity=1d", nil)
+	rec := httptest.NewRecorder()
+	bff.HandleMdgHistoryAPI(rec, req)
+
+	grans := []string{"1d", "1w", "1M", "3M", "ytd", "1y", "5y", "all", "unknown"}
+	intervals := []string{"10s", "15s", "30s", "1m", "2m", "3m", "5m", "10m", "15m", "30m", "45m", "1h", "2h", "3h", "4h", "1d", "1w", "1M", "6M", "12M", "unknown"}
+
+	// Valid key format for Alpaca
+	os.Setenv("FEED_API_KEY", "key_id:secret_key")
+	for _, g := range grans {
+		for _, iv := range intervals {
+			req := httptest.NewRequest("GET", "/api/mdg/history?ticker=AAPL&granularity="+g+"&interval="+iv, nil)
+			rec := httptest.NewRecorder()
+			bff.HandleMdgHistoryAPI(rec, req)
+		}
+	}
+
+	// Polygon vendor
+	_ = rClient.Set(context.Background(), "mdg:vendor", "polygon", 0).Err()
+	os.Setenv("FEED_API_KEY", "dummy_polygon_key")
+	for _, g := range grans {
+		for _, iv := range intervals {
+			req := httptest.NewRequest("GET", "/api/mdg/history?ticker=AAPL&granularity="+g+"&interval="+iv, nil)
+			rec := httptest.NewRecorder()
+			bff.HandleMdgHistoryAPI(rec, req)
+		}
+	}
+
+	os.Unsetenv("FEED_API_KEY")
+}
+
+func TestHandleMdgHistoryAPI_Granularities(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("failed miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rClient.Close()
+	bff := NewBFFServer(rClient, mr.Addr(), "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0")
+
+	grans := []string{"1d", "1w", "1M", "3M", "ytd", "1y", "5y", "all", "unknown"}
+	for _, g := range grans {
+		req := httptest.NewRequest("GET", "/api/mdg/history?ticker=AAPL&granularity="+g, nil)
+		rec := httptest.NewRecorder()
+		bff.HandleMdgHistoryAPI(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for granularity %s, got %d", g, rec.Code)
+		}
+	}
+}
+
 
 
 

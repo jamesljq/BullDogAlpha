@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"bulldog_alpha/cmd/ems/state"
 	"bulldog_alpha/proto/order"
@@ -412,6 +413,38 @@ func TestWALRecoveryErrors(t *testing.T) {
 	_, err = wal.Recover()
 	if err == nil {
 		t.Errorf("expected recover to fail on invalid JSON")
+	}
+}
+
+func TestEMSServer_ForcePause(t *testing.T) {
+	sm := state.NewStateMachine(nil)
+	server := &EMSServer{SM: sm}
+
+	resp, err := server.ForcePause(context.Background(), &order.ForcePauseRequest{Reason: "Manual testing pause", CorrelationId: "pause-corr-1"})
+	if err != nil {
+		t.Fatalf("ForcePause returned error: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected ForcePause to succeed")
+	}
+	if !sm.IsDegraded() {
+		t.Errorf("expected StateMachine to be degraded after ForcePause")
+	}
+}
+
+func TestRunEMS(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	walFile := "test_run_ems.wal"
+	defer os.Remove(walFile)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	err := runEMS(ctx, "0", walFile)
+	if err != nil {
+		t.Fatalf("runEMS failed: %v", err)
 	}
 }
 

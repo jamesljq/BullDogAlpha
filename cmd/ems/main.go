@@ -26,6 +26,9 @@ type EMSServer struct {
 
 func (s *EMSServer) ForcePause(ctx context.Context, req *order.ForcePauseRequest) (*order.ForcePauseResponse, error) {
 	slog.Info("ems_force_pause_received", "reason", req.Reason)
+	if s.SM != nil {
+		s.SM.SetDegraded(true)
+	}
 	return &order.ForcePauseResponse{Success: true, CorrelationId: req.CorrelationId}, nil
 }
 
@@ -115,30 +118,39 @@ func main() {
 	walPath := flag.String("wal-path", "ems.wal", "Write-Ahead Log path")
 	flag.Parse()
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := runEMS(ctx, *port, *walPath); err != nil {
+		slog.Error("ems_failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func runEMS(ctx context.Context, port, walPath string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	slog.Info("starting_ems_service", "port", *port, "wal_path", *walPath)
+	slog.Info("starting_ems_service", "port", port, "wal_path", walPath)
 
-	wal, err := state.NewFileWAL(*walPath)
+	wal, err := state.NewFileWAL(walPath)
 	if err != nil {
-		slog.Error("failed_to_initialize_wal", "path", *walPath, "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize WAL: %w", err)
 	}
 
 	sm := state.NewStateMachine(wal)
 
 	slog.Info("replaying_wal_log")
 	if err := sm.RecoverFromWAL(); err != nil {
-		slog.Error("wal_replay_failed", "error", err)
-		os.Exit(1)
+		wal.Close()
+		return fmt.Errorf("wal replay failed: %w", err)
 	}
 	slog.Info("wal_replay_completed")
 
-	lis, err := net.Listen("tcp", ":"+*port)
+	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		slog.Error("failed_to_listen", "port", *port, "error", err)
-		os.Exit(1)
+		wal.Close()
+		return fmt.Errorf("failed to listen on port %s: %w", port, err)
 	}
 
 	s := grpc.NewServer()
@@ -150,18 +162,22 @@ func main() {
 	grpc_health_v1.RegisterHealthServer(s, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
+	errChan := make(chan error, 1)
 	go func() {
-		slog.Info("ems_grpc_server_listening", "port", *port)
+		slog.Info("ems_grpc_server_listening", "port", port)
 		if err := s.Serve(lis); err != nil {
-			slog.Error("ems_grpc_server_failed", "error", err)
+			errChan <- err
 		}
 	}()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-
-	slog.Info("shutting_down_ems_gracefully")
-	s.GracefulStop()
-	wal.Close()
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting_down_ems_gracefully")
+		s.GracefulStop()
+		wal.Close()
+		return nil
+	case err := <-errChan:
+		wal.Close()
+		return err
+	}
 }

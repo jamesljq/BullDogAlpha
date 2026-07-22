@@ -23,15 +23,18 @@ interface TradeMarker {
   timestamp: number; // epoch ms
 }
 
-const checkIsMarketClosed = (): boolean => {
+export const checkIsMarketClosed = (): boolean => {
   try {
-    const nycString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
-    const nycDate = new Date(nycString);
-    const day = nycDate.getDay(); // 0 = Sunday, 6 = Saturday
-    const hours = nycDate.getHours();
-    const minutes = nycDate.getMinutes();
+    const estTimeString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    const estDate = new Date(estTimeString);
+    const day = estDate.getDay(); // 0 = Sunday, 6 = Saturday
 
-    if (day === 0 || day === 6) return true;
+    if (day === 0 || day === 6) {
+      return true;
+    }
+
+    const hours = estDate.getHours();
+    const minutes = estDate.getMinutes();
 
     const minutesSinceMidnight = hours * 60 + minutes;
     const marketOpen = 9 * 60 + 30; // 9:30 AM
@@ -51,18 +54,45 @@ interface GranularityOption {
   label: string;
   value: string;
   seconds: number;
+  periodLabel: string;
 }
 
 const GRANULARITIES: GranularityOption[] = [
-  { label: '1 Minute', value: '1m', seconds: 60 },
-  { label: '1 Hour', value: '1h', seconds: 3600 },
-  { label: '1 Day', value: '1d', seconds: 86400 },
-  { label: '1 Week', value: '1w', seconds: 604800 },
-  { label: '1 Month', value: '1M', seconds: 2592000 },
-  { label: '6 Months', value: '6M', seconds: 15552000 },
-  { label: '1 Year', value: '1y', seconds: 31104000 },
-  { label: '3 Years', value: '3y', seconds: 93312000 },
-  { label: '5 Years', value: '5y', seconds: 155520000 },
+  { label: '1D', value: '1d', seconds: 60, periodLabel: 'Today' },
+  { label: '1W', value: '1w', seconds: 3600, periodLabel: 'Past Week' },
+  { label: '1M', value: '1M', seconds: 86400, periodLabel: 'Past Month' },
+  { label: '3M', value: '3M', seconds: 2592000, periodLabel: 'Past 3 Months' },
+  { label: 'YTD', value: 'ytd', seconds: 86400, periodLabel: 'Year to Date' },
+  { label: '1Y', value: '1y', seconds: 31104000, periodLabel: 'Past Year' },
+  { label: '5Y', value: '5y', seconds: 155520000, periodLabel: 'Past 5 Years' },
+  { label: 'ALL', value: 'all', seconds: 311040000, periodLabel: 'All Time' },
+];
+
+interface IntervalOption {
+  value: string;
+  label: string;
+  category: "SECONDS" | "MINUTES" | "HOURS" | "DAYS / MONTHS";
+}
+
+const INTERVAL_OPTIONS: IntervalOption[] = [
+  { value: "10s", label: "10 seconds", category: "SECONDS" },
+  { value: "15s", label: "15 seconds", category: "SECONDS" },
+  { value: "30s", label: "30 seconds", category: "SECONDS" },
+  { value: "1m", label: "1 minute", category: "MINUTES" },
+  { value: "2m", label: "2 minutes", category: "MINUTES" },
+  { value: "3m", label: "3 minutes", category: "MINUTES" },
+  { value: "5m", label: "5 minutes", category: "MINUTES" },
+  { value: "10m", label: "10 minutes", category: "MINUTES" },
+  { value: "15m", label: "15 minutes", category: "MINUTES" },
+  { value: "30m", label: "30 minutes", category: "MINUTES" },
+  { value: "1h", label: "1 hour", category: "HOURS" },
+  { value: "2h", label: "2 hours", category: "HOURS" },
+  { value: "4h", label: "4 hours", category: "HOURS" },
+  { value: "1d", label: "1 day", category: "DAYS / MONTHS" },
+  { value: "1w", label: "1 week", category: "DAYS / MONTHS" },
+  { value: "1M", label: "1 month", category: "DAYS / MONTHS" },
+  { value: "6M", label: "6 months", category: "DAYS / MONTHS" },
+  { value: "12M", label: "12 months", category: "DAYS / MONTHS" },
 ];
 
 const generateMockHistory = (ticker: string, intervalSeconds: number): Array<{ time: number, value: number }> => {
@@ -116,6 +146,69 @@ const generateMockCandles = (ticker: string, intervalSeconds: number): Array<{ t
   return data;
 };
 
+export const calculateRSI = (prices: number[]): string => {
+  if (prices.length < 14) return "50.00";
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i < 14; i++) {
+    const difference = prices[i] - prices[i - 1];
+    if (difference > 0) gains += difference;
+    else losses -= difference;
+  }
+  let avgGain = gains / 14;
+  let avgLoss = losses / 14;
+  for (let i = 14; i < prices.length; i++) {
+    const difference = prices[i] - prices[i - 1];
+    if (difference > 0) {
+      avgGain = (avgGain * 13 + difference) / 14;
+      avgLoss = (avgLoss * 13) / 14;
+    } else {
+      avgGain = (avgGain * 13) / 14;
+      avgLoss = (avgLoss * 13 - difference) / 14;
+    }
+  }
+  if (avgLoss === 0) return "100.00";
+  const rs = avgGain / avgLoss;
+  const rsi = 100 - (100 / (1 + rs));
+  return rsi.toFixed(2);
+};
+
+const COMPANY_NAMES: Record<string, string> = {
+  AAPL: 'Apple',
+  MSFT: 'Microsoft',
+  TSLA: 'Tesla',
+  AMZN: 'Amazon',
+  NVDA: 'NVIDIA',
+  GOOG: 'Alphabet',
+};
+
+export const getStockStats = (ticker: string, candleRaw: Array<{ open: number, high: number, low: number, close: number }>) => {
+  const name = COMPANY_NAMES[ticker] || ticker;
+  let open = 323.13;
+  let high = 334.99;
+  let low = 273.75;
+  let wHigh = 368.49;
+  let wLow = 238.56;
+  let pe = 25.4;
+
+  const bars = candleRaw || [];
+
+  if (bars.length > 0) {
+    open = bars[0].open;
+    high = Math.max(...bars.map(b => b.high));
+    low = Math.min(...bars.map(b => b.low));
+    wHigh = Math.max(high, 368.49);
+    wLow = Math.min(low, 238.56);
+  } else {
+    if (ticker === "AAPL") { open = 175.20; high = 176.50; low = 174.10; wHigh = 199.62; wLow = 164.08; pe = 31.2; }
+    else if (ticker === "MSFT") { open = 330.40; high = 332.10; low = 328.50; wHigh = 384.30; wLow = 219.35; pe = 35.8; }
+    else if (ticker === "TSLA") { open = 240.50; high = 245.80; low = 238.20; wHigh = 299.29; wLow = 152.37; pe = 72.4; }
+    else if (ticker === "AMZN") { open = 130.10; high = 131.50; low = 129.20; wHigh = 145.86; wLow = 97.71; pe = 62.1; }
+    else if (ticker === "NVDA") { open = 450.80; high = 455.20; low = 447.10; wHigh = 502.66; wLow = 140.34; pe = 110.5; }
+  }
+  return { name, open, high, low, wHigh, wLow, pe };
+};
+
 
 export default function App() {
   const [isMarketClosed, setIsMarketClosed] = useState<boolean>(checkIsMarketClosed());
@@ -157,6 +250,7 @@ export default function App() {
 
   const [chartType, setChartType] = useState<"line" | "candlestick">("line");
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1m");
+  const [selectedInterval, setSelectedInterval] = useState<string>("1m");
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -180,33 +274,84 @@ export default function App() {
       setSelectedTicker(subscriptions[0]);
     }
   }, [subscriptions, selectedTicker]);
-  // Pre-populate mock history for a ticker if it has no data
+
+  const [activeTab, setActiveTab] = useState<"terminal" | "admin">("terminal");
+
+  const getPeriodChangeInfo = () => {
+    const key = `${selectedTicker}_${selectedGranularity}`;
+    const rawData = tickData[key] || [];
+    const candleRaw = candleData[key] || [];
+    const granObj = GRANULARITIES.find(g => g.value === selectedGranularity) || GRANULARITIES[0];
+
+    let currentPrice = 0;
+    let startPrice = 0;
+
+    if (chartType === "line" && rawData.length > 0) {
+      startPrice = rawData[0].value;
+      currentPrice = rawData[rawData.length - 1].value;
+    } else if (chartType === "candlestick" && candleRaw.length > 0) {
+      startPrice = candleRaw[0].open;
+      currentPrice = candleRaw[candleRaw.length - 1].close;
+    } else if (rawData.length > 0) {
+      startPrice = rawData[0].value;
+      currentPrice = rawData[rawData.length - 1].value;
+    }
+
+    const change = currentPrice - startPrice;
+    const percent = startPrice > 0 ? (change / startPrice) * 100 : 0;
+    return {
+      currentPrice,
+      change,
+      percent,
+      label: granObj.periodLabel,
+      isPositive: change >= 0,
+    };
+  };
+
+  // Load real historical data from BFF
+  const fetchHistoricalData = async (ticker: string, granularity: string, interval: string) => {
+    try {
+      const resp = await fetch(`/api/mdg/history?ticker=${ticker}&granularity=${granularity}&interval=${interval}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && data.bars && data.bars.length > 0) {
+          const key = `${ticker}_${granularity}`;
+          const lineBars = data.bars.map((b: any) => ({ time: b.time, value: b.close }));
+          const candleBars = data.bars.map((b: any) => ({
+            time: b.time,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          }));
+
+          setTickData(prev => ({ ...prev, [key]: lineBars }));
+          setCandleData(prev => ({ ...prev, [key]: candleBars }));
+          addLog(`Loaded real historical bars for ${ticker} (${granularity}, ${interval})`);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch real historical data:", e);
+    }
+    
+    // Fallback to high-fidelity mock if no key or API fails
+    const key = `${ticker}_${granularity}`;
+    const granularitySec = GRANULARITIES.find(g => g.value === granularity)?.seconds || 60;
+    
+    setTickData(prev => {
+      return { ...prev, [key]: generateMockHistory(ticker, granularitySec) };
+    });
+    setCandleData(prev => {
+      return { ...prev, [key]: generateMockCandles(ticker, granularitySec) };
+    });
+  };
+
   useEffect(() => {
     if (selectedTicker) {
-      const key = `${selectedTicker}_${selectedGranularity}`;
-      const granularitySec = GRANULARITIES.find(g => g.value === selectedGranularity)?.seconds || 60;
-      
-      if (!tickData[key]) {
-        setTickData(prev => {
-          if (prev[key]) return prev;
-          return {
-            ...prev,
-            [key]: generateMockHistory(selectedTicker, granularitySec)
-          };
-        });
-      }
-      
-      if (!candleData[key]) {
-        setCandleData(prev => {
-          if (prev[key]) return prev;
-          return {
-            ...prev,
-            [key]: generateMockCandles(selectedTicker, granularitySec)
-          };
-        });
-      }
+      fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
     }
-  }, [selectedTicker, selectedGranularity, tickData, candleData]);
+  }, [selectedTicker, selectedGranularity, selectedInterval]);
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -526,6 +671,9 @@ export default function App() {
             timeVisible: true,
             secondsVisible: true,
             borderColor: 'rgba(255, 255, 255, 0.1)',
+            rightOffset: 0,
+            fixLeftEdge: true,
+            fixRightEdge: true,
           },
           localization: {
             timeFormatter: (ts: number) => {
@@ -590,7 +738,7 @@ export default function App() {
         activeSeries.setData(data);
       }
 
-      const symbolTrades = trades.filter(t => t.symbol === selectedTicker);
+      const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker);
       const markers = symbolTrades.map(t => ({
         time: Math.floor(t.timestamp / 1000),
         position: (t.action === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
@@ -628,6 +776,17 @@ export default function App() {
     }
     return { color: '#aeaeb2' };
   };
+
+  const periodInfo = getPeriodChangeInfo();
+  const currentStockStats = getStockStats(selectedTicker, []);
+  
+  const activeKey = `${selectedTicker}_${selectedGranularity}`;
+  const rawDataForStats = tickData[activeKey] || [];
+  const candleRawForStats = candleData[activeKey] || [];
+  const pricesForStats = rawDataForStats.map(d => d.value);
+  const currentRsi = calculateRSI(pricesForStats);
+  const keyStats = getStockStats(selectedTicker, candleRawForStats);
+  const currentExecCount = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker).length;
 
   return (
     <div style={styles.container}>
@@ -704,470 +863,701 @@ export default function App() {
         </div>
       </header>
 
-      {/* Section 1: Market Data visualization console */}
-      <section style={{ ...styles.card, marginBottom: '32px' }}>
-        <h2 style={styles.cardTitle}>Market Data Ingestion Console (MDG)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '32px' }}>
+      {/* Navigation Tab Bar */}
+      <div style={{ display: 'flex', gap: '20px', padding: '0 8px', marginBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <button
+          onClick={() => setActiveTab("terminal")}
+          style={{
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === "terminal" ? '2px solid #0a84ff' : '2px solid transparent',
+            color: activeTab === "terminal" ? '#0a84ff' : '#aeaeb2',
+            padding: '12px 16px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          📈 Trading Terminal
+        </button>
+        <button
+          onClick={() => setActiveTab("admin")}
+          style={{
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === "admin" ? '2px solid #0a84ff' : '2px solid transparent',
+            color: activeTab === "admin" ? '#0a84ff' : '#aeaeb2',
+            padding: '12px 16px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          ⚙️ Ingestion & Systems Admin
+        </button>
+      </div>
+
+      {activeTab === "terminal" ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '24px', flexGrow: 1, marginBottom: '32px' }}>
           
-          {/* Controls Column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div style={styles.ctrlGroup}>
-              <span style={styles.ctrlLabel}>Active Provider Feed:</span>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                <button
-                  className="apple-btn"
-                  onClick={() => selectVendor("polygon")}
-                  style={{
-                    ...styles.actionBtn,
-                    backgroundColor: activeVendor === "polygon" ? "#0a84ff" : "rgba(255,255,255,0.05)",
-                    border: activeVendor === "polygon" ? "none" : "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  Polygon.io
-                </button>
-                <button
-                  className="apple-btn"
-                  onClick={() => selectVendor("alpaca")}
-                  style={{
-                    ...styles.actionBtn,
-                    backgroundColor: activeVendor === "alpaca" ? "#0a84ff" : "rgba(255,255,255,0.05)",
-                    border: activeVendor === "alpaca" ? "none" : "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  Alpaca
-                </button>
-              </div>
-            </div>
+          {/* Left Chart & Stats Area */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            
+            {/* Chart Card */}
+            <div style={styles.card}>
+              {/* Robinhood Stock Title & Price Header */}
+              {selectedTicker && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: 0, letterSpacing: '-0.5px' }}>
+                        {currentStockStats.name} ({selectedTicker})
+                      </h2>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        padding: '3px 9px',
+                        borderRadius: '12px',
+                        backgroundColor: isMarketClosed ? 'rgba(255, 159, 10, 0.15)' : 'rgba(48, 209, 88, 0.15)',
+                        color: isMarketClosed ? '#ff9f0a' : '#30d158',
+                        border: `1px solid ${isMarketClosed ? 'rgba(255, 159, 10, 0.3)' : 'rgba(48, 209, 88, 0.3)'}`
+                      }}>
+                        {isMarketClosed ? '● EXTENDED HOURS' : '● REGULAR MARKET'}
+                      </span>
+                    </div>
 
-            <div style={styles.ctrlGroup}>
-              <span style={styles.ctrlLabel}>Ingestion Status:</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
-                <span className={mdgStatus === "RUNNING" ? "pulse-dot-green" : "pulse-dot-orange"} style={{
-                  width: '10px', height: '10px', borderRadius: '50%', backgroundColor: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a"
-                }} />
-                <span style={{ fontSize: '14px', fontWeight: 600, color: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a" }}>
-                  {mdgStatus}
-                </span>
-                <button
-                  className="apple-btn"
-                  onClick={() => controlMdgStatus(mdgStatus === "RUNNING" ? "pause" : "resume")}
-                  style={{
-                    ...styles.toggleBtn,
-                    marginLeft: 'auto',
-                    backgroundColor: mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.15)" : "rgba(48, 209, 88, 0.15)",
-                    border: `1px solid ${mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.3)" : "rgba(48, 209, 88, 0.3)"}`,
-                    color: mdgStatus === "RUNNING" ? "#ff453a" : "#30d158",
-                  }}
-                >
-                  {mdgStatus === "RUNNING" ? "PAUSE INGEST" : "RESUME INGEST"}
-                </button>
-              </div>
-            </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {/* TradingView Bar Interval Dropdown */}
+                      <select
+                        value={selectedInterval}
+                        onChange={(e) => setSelectedInterval(e.target.value)}
+                        style={{ ...styles.dropdown, backgroundColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.12)' }}
+                      >
+                        <optgroup label="⏱️ SECONDS">
+                          {INTERVAL_OPTIONS.filter(i => i.category === "SECONDS").map(i => (
+                            <option key={i.value} value={i.value}>{i.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="⏱️ MINUTES">
+                          {INTERVAL_OPTIONS.filter(i => i.category === "MINUTES").map(i => (
+                            <option key={i.value} value={i.value}>{i.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="⏳ HOURS">
+                          {INTERVAL_OPTIONS.filter(i => i.category === "HOURS").map(i => (
+                            <option key={i.value} value={i.value}>{i.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="📅 DAYS / MONTHS">
+                          {INTERVAL_OPTIONS.filter(i => i.category === "DAYS / MONTHS").map(i => (
+                            <option key={i.value} value={i.value}>{i.label}</option>
+                          ))}
+                        </optgroup>
+                      </select>
 
-            <div style={styles.ctrlGroup}>
-              <span style={styles.ctrlLabel}>Subscribe Ticker:</span>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                <input
-                  type="text"
-                  placeholder="e.g. AAPL"
-                  value={newTickerInput}
-                  onChange={(e) => setNewTickerInput(e.target.value)}
-                  style={styles.textInput}
-                />
-                <button
-                  className="apple-btn"
-                  onClick={() => addSubscription(newTickerInput)}
-                  style={{ ...styles.actionBtn, backgroundColor: '#30d158', width: '80px', color: '#fff' }}
-                >
-                  ADD
-                </button>
-              </div>
-            </div>
-
-            <div style={styles.ctrlGroup}>
-              <span style={styles.ctrlLabel}>Subscriptions ({subscriptions.length}):</span>
-              <div className="scroll-container" style={{ maxHeight: '180px', overflowY: 'auto', marginTop: '6px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '6px' }}>
-                {subscriptions.map(sym => (
-                  <div key={sym} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid rgba(255,255,255,0.03)', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, fontSize: '13px', color: selectedTicker === sym ? '#0a84ff' : '#fff', cursor: 'pointer' }} onClick={() => setSelectedTicker(sym)}>
-                      {sym} {selectedTicker === sym && "•"}
-                    </span>
-                    <button
-                      className="apple-btn"
-                      onClick={() => removeSubscription(sym)}
-                      style={{ border: 'none', background: 'transparent', color: '#ff453a', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}
-                    >
-                      DELETE
-                    </button>
+                      {/* Dropdown for Line / Candlestick */}
+                      <select
+                        value={chartType}
+                        onChange={(e) => setChartType(e.target.value as "line" | "candlestick")}
+                        style={styles.dropdown}
+                      >
+                        <option value="line">📈 Line</option>
+                        <option value="candlestick">🕯️ Candlestick</option>
+                      </select>
+                    </div>
                   </div>
-                ))}
+
+                  {/* Big Price Display */}
+                  <div style={{ fontSize: '38px', fontWeight: 700, color: '#ffffff', marginTop: '4px', letterSpacing: '-0.8px' }}>
+                    ${periodInfo.currentPrice > 0 ? periodInfo.currentPrice.toFixed(2) : currentStockStats.open.toFixed(2)}
+                  </div>
+
+                  {/* Change & Percentage Indicator */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                    <span style={{
+                      fontSize: '15px',
+                      fontWeight: 600,
+                      color: periodInfo.isPositive ? '#30d158' : '#ff453a'
+                    }}>
+                      {periodInfo.isPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.change).toFixed(2)} ({periodInfo.isPositive ? '+' : ''}{periodInfo.percent.toFixed(2)}%)
+                    </span>
+                    <span style={{ fontSize: '13px', color: '#8e8e93', fontWeight: 500 }}>
+                      {periodInfo.label}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {isMarketClosed && (
+                <div style={{
+                  backgroundColor: 'rgba(255, 69, 58, 0.08)',
+                  border: '1px solid rgba(255, 69, 58, 0.2)',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  color: '#ff453a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '16px',
+                }}>
+                  <span>⚠️</span>
+                  <span>The market is currently closed. Displaying historical / mock data.</span>
+                </div>
+              )}
+
+              {/* Canvas Container */}
+              <div ref={chartContainerRef} style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }} />
+
+              {/* Robinhood Bottom Timeframe Selector Bar */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                marginTop: '16px',
+                paddingTop: '8px',
+                borderTop: '1px solid rgba(255,255,255,0.06)',
+                overflowX: 'auto',
+              }}>
+                {GRANULARITIES.map(g => {
+                  const isSelected = selectedGranularity === g.value;
+                  return (
+                    <button
+                      key={g.value}
+                      onClick={() => setSelectedGranularity(g.value)}
+                      className="apple-btn"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: isSelected ? '3px solid #30d158' : '3px solid transparent',
+                        color: isSelected ? '#30d158' : '#8e8e93',
+                        fontSize: '14px',
+                        fontWeight: isSelected ? 700 : 500,
+                        padding: '6px 12px 8px 12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out',
+                      }}
+                    >
+                      {g.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Key Statistics Grid */}
+            <div style={styles.card}>
+              <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '20px' }}>Key Statistics</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>Open Price</span>
+                  <span style={styles.statValue}>${keyStats.open.toFixed(2)}</span>
+                </div>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>Daily High / Low</span>
+                  <span style={styles.statValue}>${keyStats.high.toFixed(2)} / ${keyStats.low.toFixed(2)}</span>
+                </div>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>52-Week High / Low</span>
+                  <span style={styles.statValue}>${keyStats.wHigh.toFixed(2)} / ${keyStats.wLow.toFixed(2)}</span>
+                </div>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>P/E Ratio</span>
+                  <span style={{ ...styles.statValue, color: '#0a84ff' }}>{keyStats.pe.toFixed(1)}x</span>
+                </div>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>RSI (14)</span>
+                  <span style={{
+                    ...styles.statValue,
+                    color: parseFloat(currentRsi) > 70 ? '#ff453a' : parseFloat(currentRsi) < 30 ? '#30d158' : '#0a84ff'
+                  }}>{currentRsi}</span>
+                </div>
+                <div style={styles.statBox}>
+                  <span style={styles.statLabel}>Trade Executions</span>
+                  <span style={{ ...styles.statValue, color: currentExecCount > 0 ? '#30d158' : '#8e8e93' }}>
+                    {currentExecCount} {currentExecCount === 1 ? 'execution' : 'executions'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Chart Column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Active Chart:</span>
-                  <select
-                    value={selectedTicker}
-                    onChange={(e) => setSelectedTicker(e.target.value)}
-                    style={styles.dropdown}
-                  >
-                    <option value="">-- No Symbol --</option>
-                    {subscriptions.map(sym => (
-                      <option key={sym} value={sym}>{sym}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Type:</span>
-                  <select
-                    value={chartType}
-                    onChange={(e) => setChartType(e.target.value as "line" | "candlestick")}
-                    style={styles.dropdown}
-                  >
-                    <option value="line">Line</option>
-                    <option value="candlestick">Candlestick</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', color: '#aeaeb2' }}>Granularity:</span>
-                  <select
-                    value={selectedGranularity}
-                    onChange={(e) => setSelectedGranularity(e.target.value)}
-                    style={styles.dropdown}
-                  >
-                    {GRANULARITIES.map(g => (
-                      <option key={g.value} value={g.value}>{g.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {selectedTicker && (
-                <div style={{ display: 'flex', gap: '10px' }}>
+          {/* Right Watchlist & Action Form */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            
+            {/* Quick Trade Form */}
+            {selectedTicker && (
+              <div style={styles.card}>
+                <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '16px' }}>Trade {selectedTicker}</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                   <button
                     className="apple-btn"
                     onClick={() => executeSimulatedTrade("BUY")}
-                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(48, 209, 88, 0.2)', border: '1px solid rgba(48,209,88,0.4)', color: '#30d158', height: '32px', fontSize: '12px' }}
+                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(48, 209, 88, 0.2)', border: '1px solid rgba(48,209,88,0.4)', color: '#30d158', width: '100%', height: '40px', fontSize: '13px', fontWeight: 600 }}
                   >
                     🟢 SIMULATE BUY 100
                   </button>
                   <button
                     className="apple-btn"
                     onClick={() => executeSimulatedTrade("SELL")}
-                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(255, 69, 58, 0.2)', border: '1px solid rgba(255,69,58,0.4)', color: '#ff453a', height: '32px', fontSize: '12px' }}
+                    style={{ ...styles.actionBtn, backgroundColor: 'rgba(255, 69, 58, 0.2)', border: '1px solid rgba(255,69,58,0.4)', color: '#ff453a', width: '100%', height: '40px', fontSize: '13px', fontWeight: 600 }}
                   >
                     🔴 SIMULATE SELL 100
                   </button>
                 </div>
-              )}
-            </div>
-
-            {isMarketClosed && (
-              <div style={{
-                backgroundColor: 'rgba(255, 69, 58, 0.1)',
-                border: '1px solid rgba(255, 69, 58, 0.25)',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontSize: '13px',
-                color: '#ff453a',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginBottom: '4px',
-                backdropFilter: 'blur(10px)',
-                lineHeight: '1.4'
-              }}>
-                <span>⚠️</span>
-                <span>The market is currently closed. Displaying historical / mock data.</span>
               </div>
             )}
 
-            {/* Canvas Container */}
-            <div ref={chartContainerRef} style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }} />
+            {/* Watchlist */}
+            <div style={styles.card}>
+              <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '12px' }}>Watchlist</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {subscriptions.map(sym => {
+                  const key = `${sym}_${selectedGranularity}`;
+                  const ticks = tickData[key] || [];
+                  const latestPrice = ticks.length > 0 ? ticks[ticks.length - 1].value : 0.0;
+                  const prevPrice = ticks.length > 1 ? ticks[ticks.length - 2].value : latestPrice;
+                  const changePercent = prevPrice !== 0 ? ((latestPrice - prevPrice) / prevPrice) * 100 : 0.0;
+                  const isUp = changePercent >= 0;
+                  
+                  return (
+                    <div
+                      key={sym}
+                      onClick={() => setSelectedTicker(sym)}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: selectedTicker === sym ? 'rgba(10, 132, 255, 0.15)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${selectedTicker === sym ? 'rgba(10, 132, 255, 0.3)' : 'transparent'}`,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: '#ffffff' }}>{sym}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 600 }}>${latestPrice.toFixed(2)}</span>
+                        <span style={{ fontSize: '11px', color: isUp ? '#30d158' : '#ff453a' }}>
+                          {isUp ? '+' : ''}{changePercent.toFixed(2)}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
         </div>
-      </section>
+      ) : (
+        <>
+          {/* Section 1: Market Data Ingestion Console (MDG) */}
+          <section style={{ ...styles.card, marginBottom: '32px' }}>
+            <h2 style={styles.cardTitle}>Market Data Ingestion Console (MDG)</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+              
+              {/* Controls Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={styles.ctrlGroup}>
+                  <span style={styles.ctrlLabel}>Active Provider Feed:</span>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                    <button
+                      className="apple-btn"
+                      onClick={() => selectVendor("polygon")}
+                      style={{
+                        ...styles.actionBtn,
+                        backgroundColor: activeVendor === "polygon" ? "#0a84ff" : "rgba(255,255,255,0.05)",
+                        border: activeVendor === "polygon" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      Polygon.io
+                    </button>
+                    <button
+                      className="apple-btn"
+                      onClick={() => selectVendor("alpaca")}
+                      style={{
+                        ...styles.actionBtn,
+                        backgroundColor: activeVendor === "alpaca" ? "#0a84ff" : "rgba(255,255,255,0.05)",
+                        border: activeVendor === "alpaca" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      Alpaca
+                    </button>
+                  </div>
+                </div>
 
-      {/* Grid: Topology / Controls / Executions */}
-      <main style={styles.mainGrid}>
-        
-        {/* Left column: Microservices & Circuit command */}
-        <section style={styles.leftCol}>
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Microservices Health & Topology</h2>
-            <div style={styles.matrixContainer}>
-              {Object.entries(services).map(([name, svc]) => {
-                const isEngine = name === "alpha_engine";
-                const isServing = svc.status === "SERVING";
-                
-                let statusLabel = svc.status;
-                let dotColor = isServing ? "#30d158" : "#ff453a";
-                let pulseClass = isServing ? "pulse-dot-green" : "pulse-dot-red";
-                let latencyLabel = `${svc.latency_ms} ms`;
-                
-                if (isEngine) {
-                  if (isServing) {
-                    statusLabel = "ACTIVE (STRATEGY)";
-                    dotColor = "#30d158";
-                    pulseClass = "pulse-dot-green";
-                  } else {
-                    statusLabel = "INACTIVE (STRATEGY)";
-                    dotColor = "#8e8e93";
-                    pulseClass = "";
-                    latencyLabel = "offline";
-                  }
-                }
-                
-                return (
-                  <div key={name} className="service-card" style={styles.serviceItem}>
-                    <div style={styles.serviceMeta}>
-                      <span style={styles.serviceName}>{name.toUpperCase()}</span>
-                      <span style={styles.serviceLatency}>{latencyLabel}</span>
+                <div style={styles.ctrlGroup}>
+                  <span style={styles.ctrlLabel}>Ingestion Status:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                    <span className={mdgStatus === "RUNNING" ? "pulse-dot-green" : "pulse-dot-orange"} style={{
+                      width: '10px', height: '10px', borderRadius: '50%', backgroundColor: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a"
+                    }} />
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: mdgStatus === "RUNNING" ? "#30d158" : "#ff9f0a" }}>
+                      {mdgStatus}
+                    </span>
+                    <button
+                      className="apple-btn"
+                      onClick={() => controlMdgStatus(mdgStatus === "RUNNING" ? "pause" : "resume")}
+                      style={{
+                        ...styles.toggleBtn,
+                        backgroundColor: mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.15)" : "rgba(48, 209, 88, 0.15)",
+                        border: `1px solid ${mdgStatus === "RUNNING" ? "rgba(255, 69, 58, 0.3)" : "rgba(48, 209, 88, 0.3)"}`,
+                        color: mdgStatus === "RUNNING" ? "#ff453a" : "#30d158",
+                      }}
+                    >
+                      {mdgStatus === "RUNNING" ? "PAUSE INGEST" : "RESUME INGEST"}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={styles.ctrlGroup}>
+                  <span style={styles.ctrlLabel}>Subscribe Ticker:</span>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. AAPL"
+                      value={newTickerInput}
+                      onChange={(e) => setNewTickerInput(e.target.value)}
+                      style={styles.textInput}
+                    />
+                    <button
+                      className="apple-btn"
+                      onClick={() => addSubscription(newTickerInput)}
+                      style={{ ...styles.actionBtn, backgroundColor: '#30d158', width: '80px', color: '#fff' }}
+                    >
+                      ADD
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Subscriptions List Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <span style={styles.ctrlLabel}>Subscriptions ({subscriptions.length}):</span>
+                <div className="scroll-container" style={{
+                  maxHeight: '180px',
+                  overflowY: 'auto',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(0,0,0,0.15)'
+                }}>
+                  {subscriptions.map(sym => (
+                    <div
+                      key={sym}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 16px',
+                        borderBottom: '1px solid rgba(255,255,255,0.04)'
+                      }}
+                    >
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: '#f5f5f7' }}>
+                        {sym} <span style={{ color: '#30d158', fontSize: '11px', marginLeft: '6px' }}>●</span>
+                      </span>
+                      <button
+                        className="apple-btn"
+                        onClick={() => removeSubscription(sym)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#ff453a',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        DELETE
+                      </button>
                     </div>
-                    <div style={styles.statusRow}>
-                      <div className={pulseClass} style={{
-                        ...styles.statusDot,
-                        backgroundColor: dotColor,
-                      }} />
-                      <span style={{
-                        ...styles.statusText,
-                        color: isEngine && !isServing ? "#8e8e93" : isServing ? "#30d158" : "#ff453a"
-                      }}>{statusLabel}</span>
+                  ))}
+                  {subscriptions.length === 0 && (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#8e8e93', fontSize: '13px' }}>
+                      No active ticker subscriptions
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          {/* Microservices Health & Topology Matrix */}
+          <main style={styles.mainGrid}>
+            <section style={styles.leftCol}>
+              <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Microservices Health & Topology</h2>
+                <div style={styles.matrixContainer}>
+                  {Object.entries(services).map(([name, svc]) => {
+                    const isServing = svc.status === "SERVING";
+                    const latencyLabel = isServing ? `${svc.latency_ms} ms` : "offline";
+                    
+                    return (
+                      <div key={name} className="service-card" style={styles.serviceItem}>
+                        <div style={styles.serviceMeta}>
+                          <span style={styles.serviceName}>{name.toUpperCase()}</span>
+                          <span style={styles.serviceLatency}>{latencyLabel}</span>
+                        </div>
+                        <div style={styles.statusRow}>
+                          <span className={isServing ? "pulse-dot-green" : "pulse-dot-red"} style={{
+                            ...styles.statusDot,
+                            backgroundColor: isServing ? "#30d158" : "#ff453a",
+                          }} />
+                          <span style={{
+                            ...styles.statusText,
+                            color: isServing ? "#30d158" : "#ff453a",
+                          }}>
+                            {isServing ? "SERVING" : "INACTIVE (STRATEGY)"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {systemState === "DEGRADED" && (
+                  <div style={styles.degradeWarning}>
+                    <div style={styles.warningIcon}>⚠</div>
+                    <div>
+                      <strong>System Health Degraded:</strong> One or more critical microservices is reporting non-serving or extreme network latency. Automated risk control activated.
                     </div>
                   </div>
-                );
-              })}
-            </div>
-            {systemState === "DEGRADED" && (
-              <div style={styles.degradeWarning}>
-                <div style={styles.warningIcon}>⚠</div>
-                <div>SYSTEM DEGRADED: Opening new positions is disabled.</div>
+                )}
               </div>
-            )}
-          </div>
 
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Global Circuit Breaker Command Panel</h2>
-            <div style={styles.buttonCluster}>
-              <button 
-                className="apple-btn"
-                onClick={() => sendOOBAction("pause", "Manual admin pause")}
-                style={{
-                  ...styles.btn,
-                  backgroundColor: "rgba(255, 159, 10, 0.15)",
-                  border: "1px solid rgba(255, 159, 10, 0.3)",
-                  color: "#ff9f0a"
-                }}
-              >
-                ⏸ PAUSE TRADING
-              </button>
-              
-              <button 
-                className="apple-btn"
-                onClick={() => sendOOBAction("panic", "Emergency panic button")}
-                style={{
-                  ...styles.btn,
-                  ...styles.panicBtn,
-                  backgroundColor: "#ff3b30",
-                  color: "#fff",
-                  boxShadow: "0 4px 16px rgba(255, 59, 48, 0.3)"
-                }}
-              >
-                🚨 PANIC LIQUIDATE
-              </button>
+              {/* Global Circuit Breaker Command Panel */}
+              <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Global Circuit Breaker Command Panel</h2>
+                <div style={styles.buttonCluster}>
+                  <button 
+                    className="apple-btn"
+                    onClick={() => sendOOBAction("pause", "Manual admin pause")}
+                    style={{
+                      ...styles.btn,
+                      backgroundColor: "rgba(255, 159, 10, 0.15)",
+                      border: "1px solid rgba(255, 159, 10, 0.3)",
+                      color: "#ff9f0a"
+                    }}
+                  >
+                    ⏸ PAUSE TRADING
+                  </button>
+                  
+                  <button 
+                    className="apple-btn"
+                    onClick={() => sendOOBAction("panic", "Emergency panic button")}
+                    style={{
+                      ...styles.btn,
+                      ...styles.panicBtn,
+                      backgroundColor: "#ff3b30",
+                      color: "#fff",
+                      boxShadow: "0 4px 16px rgba(255, 59, 48, 0.3)"
+                    }}
+                  >
+                    🚨 PANIC LIQUIDATE
+                  </button>
 
-              <button 
-                className="apple-btn"
-                onClick={requestResume}
-                disabled={circuitState === "RUNNING"}
-                style={{
-                  ...styles.btn,
-                  backgroundColor: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.03)" : "#30d158",
-                  color: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.2)" : "#fff",
-                  border: circuitState === "RUNNING" ? "1px solid rgba(255, 255, 255, 0.05)" : "none",
-                  boxShadow: circuitState === "RUNNING" ? "none" : "0 4px 16px rgba(48, 209, 88, 0.3)"
-                }}
-              >
-                ⚡ SAFE RESUME WIZARD
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* Right column: Risk limits, strategies, executions tracker */}
-        <section style={styles.rightCol}>
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Dynamic Risk Control & Parameters</h2>
-            
-            <div style={styles.sliderGroup}>
-              <div style={styles.sliderLabelRow}>
-                <span>Max Position Limit (Qty)</span>
-                <span style={styles.sliderValue}>{maxPosition}</span>
+                  <button 
+                    className="apple-btn"
+                    onClick={requestResume}
+                    disabled={circuitState === "RUNNING"}
+                    style={{
+                      ...styles.btn,
+                      backgroundColor: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.03)" : "#30d158",
+                      color: circuitState === "RUNNING" ? "rgba(255, 255, 255, 0.2)" : "#fff",
+                      border: circuitState === "RUNNING" ? "1px solid rgba(255, 255, 255, 0.05)" : "none",
+                      boxShadow: circuitState === "RUNNING" ? "none" : "0 4px 16px rgba(48, 209, 88, 0.3)"
+                    }}
+                  >
+                    ⚡ SAFE RESUME WIZARD
+                  </button>
+                </div>
               </div>
-              <input 
-                type="range" 
-                min="100" 
-                max="5000" 
-                step="100"
-                value={maxPosition}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setMaxPosition(val);
-                  publishConfig(val, maxLeverage);
-                }}
-                style={styles.slider}
-              />
-            </div>
+            </section>
 
-            <div style={styles.sliderGroup}>
-              <div style={styles.sliderLabelRow}>
-                <span>Max Leverage Limit</span>
-                <span style={styles.sliderValue}>{maxLeverage}x</span>
+            <section style={styles.rightCol}>
+              {/* Dynamic Risk Control & Parameters */}
+              <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Dynamic Risk Control & Parameters</h2>
+                <div style={styles.paramGrid}>
+                  <div style={styles.paramRow}>
+                    <div style={styles.paramMeta}>
+                      <span style={styles.paramName}>Max Position Limit (Qty)</span>
+                      <span style={styles.paramVal}>{maxPosition}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="100"
+                      max="2000"
+                      step="50"
+                      value={maxPosition}
+                      onChange={(e) => publishConfig(parseInt(e.target.value), maxLeverage)}
+                      style={styles.slider}
+                    />
+                  </div>
+
+                  <div style={styles.paramRow}>
+                    <div style={styles.paramMeta}>
+                      <span style={styles.paramName}>Max Leverage Limit</span>
+                      <span style={styles.paramVal}>{maxLeverage}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="5.0"
+                      step="0.1"
+                      value={maxLeverage}
+                      onChange={(e) => publishConfig(maxPosition, parseFloat(e.target.value))}
+                      style={styles.slider}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ ...styles.ctrlGroup, marginTop: '24px' }}>
+                  <span style={styles.ctrlLabel}>Active Strategies Hot-Loading</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '12px 16px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.04)'
+                    }}>
+                      <span style={{ fontSize: '13px', fontWeight: 500 }}>Reinforcement Learning Strategy (RL)</span>
+                      <span
+                        onClick={() => setRlStrategyActive(!rlStrategyActive)}
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: rlStrategyActive ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255,255,255,0.05)',
+                          color: rlStrategyActive ? '#30d158' : '#aeaeb2',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {rlStrategyActive ? "ACTIVE" : "INACTIVE"}
+                      </span>
+                    </div>
+
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '12px 16px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.04)'
+                    }}>
+                      <span style={{ fontSize: '13px', fontWeight: 500 }}>Trend Following Strategy</span>
+                      <span
+                        onClick={() => setTrendStrategyActive(!trendStrategyActive)}
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: trendStrategyActive ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255,255,255,0.05)',
+                          color: trendStrategyActive ? '#30d158' : '#aeaeb2',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {trendStrategyActive ? "ACTIVE" : "INACTIVE"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <input 
-                type="range" 
-                min="0.5" 
-                max="3.0" 
-                step="0.1"
-                value={maxLeverage}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setMaxLeverage(val);
-                  publishConfig(maxPosition, val);
-                }}
-                style={styles.slider}
-              />
-            </div>
 
-            <hr style={styles.divider} />
-
-            <h3 style={styles.subTitle}>Active Strategies Hot-Loading</h3>
-            
-            <div style={styles.toggleRow}>
-              <span>Reinforcement Learning Strategy (RL)</span>
-              <button 
-                className="apple-btn"
-                onClick={() => {
-                  setRlStrategyActive(!rlStrategyActive);
-                  addLog(`RL Strategy toggled ${!rlStrategyActive ? "ON" : "OFF"}`);
-                }}
-                style={{
-                  ...styles.toggleBtn,
-                  backgroundColor: rlStrategyActive ? "#30d158" : "rgba(255, 255, 255, 0.08)",
-                  border: rlStrategyActive ? "none" : "1px solid rgba(255, 255, 255, 0.08)",
-                  color: rlStrategyActive ? "#fff" : "#8e8e93"
-                }}
-              >
-                {rlStrategyActive ? "ACTIVE" : "INACTIVE"}
-              </button>
-            </div>
-
-            <div style={styles.toggleRow}>
-              <span>Trend Following Strategy</span>
-              <button 
-                className="apple-btn"
-                onClick={() => {
-                  setTrendStrategyActive(!trendStrategyActive);
-                  addLog(`Trend Strategy toggled ${!trendStrategyActive ? "ON" : "OFF"}`);
-                }}
-                style={{
-                  ...styles.toggleBtn,
-                  backgroundColor: trendStrategyActive ? "#30d158" : "rgba(255, 255, 255, 0.08)",
-                  border: trendStrategyActive ? "none" : "1px solid rgba(255, 255, 255, 0.08)",
-                  color: trendStrategyActive ? "#fff" : "#8e8e93"
-                }}
-              >
-                {trendStrategyActive ? "ACTIVE" : "INACTIVE"}
-              </button>
-            </div>
-          </div>
-
-          {/* Trade Executions Table synced to Chart Timeline */}
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Simulated Execution Ledger</h2>
-            <div className="scroll-container" style={{ maxHeight: '180px', overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', color: '#8e8e93', textAlign: 'left' }}>
-                    <th style={{ padding: '6px' }}>Time (PST)</th>
-                    <th style={{ padding: '6px' }}>Action</th>
-                    <th style={{ padding: '6px' }}>Symbol</th>
-                    <th style={{ padding: '6px' }}>Price</th>
-                    <th style={{ padding: '6px' }}>Nav</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: '12px', color: '#8e8e93' }}>No transactions recorded.</td>
-                    </tr>
-                  ) : (
-                    trades.map((t, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', verticalAlign: 'middle' }}>
-                        <td style={{ padding: '6px' }}>
-                          {new Date(t.timestamp).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-                        </td>
-                        <td style={{ padding: '6px', fontWeight: 600, color: t.action === 'BUY' ? '#30d158' : '#ff453a' }}>
-                          {t.action}
-                        </td>
-                        <td style={{ padding: '6px' }}>{t.symbol}</td>
-                        <td style={{ padding: '6px', fontWeight: 500 }}>${t.price}</td>
-                        <td style={{ padding: '6px' }}>
-                          <button
-                            className="apple-btn"
-                            onClick={() => jumpChartToTrade(t.timestamp)}
-                            style={{ ...styles.actionBtn, height: '22px', fontSize: '10px', padding: '0 8px', backgroundColor: 'rgba(10,132,255,0.15)', color: '#0a84ff', border: '1px solid rgba(10,132,255,0.3)' }}
-                          >
-                            Jump
-                          </button>
-                        </td>
+              {/* Simulated Execution Ledger */}
+              <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Simulated Execution Ledger</h2>
+                <div className="scroll-container" style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: '#8e8e93', textAlign: 'left' }}>
+                        <th style={{ padding: '8px 4px' }}>Time (PST)</th>
+                        <th style={{ padding: '8px 4px' }}>Action</th>
+                        <th style={{ padding: '8px 4px' }}>Symbol</th>
+                        <th style={{ padding: '8px 4px' }}>Price</th>
+                        <th style={{ padding: '8px 4px', textAlign: 'right' }}>Nav</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      </main>
+                    </thead>
+                    <tbody>
+                      {(Array.isArray(trades) ? trades : []).map((t, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.03)', color: '#f5f5f7' }}>
+                          <td style={{ padding: '10px 4px', color: '#aeaeb2' }}>{new Date(t.timestamp).toLocaleTimeString()}</td>
+                          <td style={{ padding: '10px 4px', fontWeight: 600, color: t.action === 'BUY' ? '#30d158' : '#ff453a' }}>{t.action}</td>
+                          <td style={{ padding: '10px 4px', fontWeight: 500 }}>{t.symbol}</td>
+                          <td style={{ padding: '10px 4px', fontFamily: 'monospace' }}>${t.price}</td>
+                          <td style={{ padding: '10px 4px', textAlign: 'right' }}>
+                            <button
+                              className="apple-btn"
+                              onClick={() => jumpChartToTrade(t.timestamp)}
+                              style={{
+                                backgroundColor: 'rgba(10, 132, 255, 0.15)',
+                                border: '1px solid rgba(10,132,255,0.25)',
+                                color: '#0a84ff',
+                                fontSize: '10px',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Jump
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {trades.length === 0 && (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#8e8e93' }}>No trade records found</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
 
-      {devMode && (
-        <section style={{ ...styles.card, marginBottom: '32px', borderColor: 'rgba(255, 69, 58, 0.3)' }}>
-          <h2 style={{ ...styles.cardTitle, color: '#ff453a', borderBottomColor: 'rgba(255, 69, 58, 0.1)' }}>Developer Modes & Control</h2>
-          <button 
-            className="apple-btn"
-            onClick={async () => {
-              addLog("Triggering physical platform shutdown API...");
-              try {
-                const resp = await fetch("/api/shutdown", { method: "POST" });
-                if (resp.ok) {
-                  addLog("Shutdown signal accepted by BFF Gateway. Backend exiting...");
-                } else {
-                  addLog("Failed to trigger shutdown API.");
-                }
-              } catch (err) {
-                addLog(`Shutdown API error: ${err}`);
-              }
-            }}
-            style={{
-              ...styles.btn,
-              backgroundColor: "rgba(255, 69, 58, 0.1)",
-              border: "1px solid rgba(255, 69, 58, 0.3)",
-              color: "#ff453a",
-              width: '100%',
-            }}
-          >
-            🛑 SHUTDOWN ALL SERVICES
-          </button>
-        </section>
+          {/* Developer Modes & Control */}
+          {devMode && (
+            <section style={{ ...styles.card, marginBottom: '32px', borderColor: 'rgba(255, 69, 58, 0.3)' }}>
+              <h2 style={{ ...styles.cardTitle, color: '#ff453a', borderBottomColor: 'rgba(255, 69, 58, 0.1)' }}>Developer Modes & Control</h2>
+              <button 
+                className="apple-btn"
+                onClick={async () => {
+                  addLog("Triggering physical platform shutdown API...");
+                  try {
+                    const resp = await fetch("/api/shutdown", { method: "POST" });
+                    if (resp.ok) {
+                      addLog("Shutdown signal accepted by BFF Gateway. Backend exiting...");
+                    } else {
+                      addLog("Failed to trigger shutdown API.");
+                    }
+                  } catch (err) {
+                    addLog(`Shutdown API error: ${err}`);
+                  }
+                }}
+                style={{
+                  ...styles.btn,
+                  backgroundColor: "rgba(255, 69, 58, 0.1)",
+                  border: "1px solid rgba(255, 69, 58, 0.3)",
+                  color: "#ff453a",
+                  width: '100%',
+                }}
+              >
+                🛑 SHUTDOWN ALL SERVICES
+              </button>
+            </section>
+          )}
+        </>
       )}
 
       {/* Terminal Log Console */}
@@ -1500,5 +1890,28 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     outline: 'none',
     cursor: 'pointer',
+  },
+  statBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid rgba(255, 255, 255, 0.06)',
+    borderRadius: '12px',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    transition: 'all 0.2s ease-in-out',
+  },
+  statLabel: {
+    fontSize: '12px',
+    fontWeight: 500,
+    color: '#8e8e93',
+    letterSpacing: '0.2px',
+    textTransform: 'uppercase',
+  },
+  statValue: {
+    fontSize: '18px',
+    fontWeight: 700,
+    color: '#f5f5f7',
+    letterSpacing: '-0.3px',
   },
 };
