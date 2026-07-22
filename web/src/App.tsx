@@ -27,7 +27,7 @@ export interface FormattedMarker {
   time: number;
   position: 'belowBar' | 'aboveBar';
   color: string;
-  shape: 'circle';
+  shape: 'arrowUp' | 'arrowDown';
   size: number;
   text: string;
 }
@@ -95,8 +95,8 @@ export const aggregateTradeMarkers = (
       time,
       position: isBuy ? 'belowBar' : 'aboveBar',
       color: isBuy ? '#30d158' : '#ff453a',
-      shape: 'circle',
-      size: count > 1 ? 1.0 : 0.8,
+      shape: isBuy ? 'arrowUp' : 'arrowDown',
+      size: count > 1 ? 1.2 : 1.0,
       text,
     });
   }
@@ -572,6 +572,7 @@ export default function App() {
   const chartRef = useRef<any>(null);
   const [activeSeries, setActiveSeries] = useState<any>(null);
   const seriesMarkersRef = useRef<any>(null);
+  const loadedKeyRef = useRef<string>("");
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -1165,11 +1166,16 @@ export default function App() {
         activeSeries.setData(data);
       }
 
-      if (chartRef.current) {
-        try {
-          chartRef.current.timeScale().fitContent();
-        } catch (e) {
-          // ignore fitContent error on unmounted chart
+      // ONLY call fitContent on initial timeframe/symbol/chartType switch, preserve zoom on ticks
+      const currentKey = `${selectedTicker}_${selectedGranularity}_${chartType}`;
+      if (loadedKeyRef.current !== currentKey) {
+        loadedKeyRef.current = currentKey;
+        if (chartRef.current) {
+          try {
+            chartRef.current.timeScale().fitContent();
+          } catch (e) {
+            // ignore fitContent error on unmounted chart
+          }
         }
       }
 

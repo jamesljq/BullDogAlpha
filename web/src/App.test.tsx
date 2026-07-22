@@ -770,12 +770,14 @@ describe('Bulldog Alpha Web Console', () => {
     // Candle 1000 (merged 2 BUY trades: 100@325 + 200@326 = 300 total qty, avg price 325.67)
     expect(markers[0].time).toBe(1000);
     expect(markers[0].position).toBe('belowBar');
+    expect(markers[0].shape).toBe('arrowUp');
     expect(markers[0].color).toBe('#30d158');
     expect(markers[0].text).toBe('B 2x (300@325.67)');
 
     // Candle 2000 (single SELL trade: 50@330)
     expect(markers[1].time).toBe(2000);
     expect(markers[1].position).toBe('aboveBar');
+    expect(markers[1].shape).toBe('arrowDown');
     expect(markers[1].color).toBe('#ff453a');
     expect(markers[1].text).toBe('S 50@330.00');
   });
