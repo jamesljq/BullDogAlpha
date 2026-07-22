@@ -23,31 +23,92 @@ interface TradeMarker {
   timestamp: number; // epoch ms
 }
 
-export const checkIsMarketClosed = (): boolean => {
+export interface MarketSessionInfo {
+  isClosed: boolean;
+  label: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeColor: string;
+  sessionType: 'REGULAR' | 'PRE_MARKET' | 'EXTENDED' | 'NIGHT' | 'WEEKEND';
+}
+
+export const getMarketSessionStatus = (): MarketSessionInfo => {
   try {
     const estTimeString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
     const estDate = new Date(estTimeString);
     const day = estDate.getDay(); // 0 = Sunday, 6 = Saturday
 
     if (day === 0 || day === 6) {
-      return true;
+      return {
+        isClosed: true,
+        label: '● WEEKEND CLOSED',
+        badgeBg: 'rgba(142, 142, 147, 0.15)',
+        badgeBorder: 'rgba(142, 142, 147, 0.3)',
+        badgeColor: '#8e8e93',
+        sessionType: 'WEEKEND',
+      };
     }
 
     const hours = estDate.getHours();
     const minutes = estDate.getMinutes();
+    const mins = hours * 60 + minutes;
 
-    const minutesSinceMidnight = hours * 60 + minutes;
-    const marketOpen = 9 * 60 + 30; // 9:30 AM
-    const marketClose = 16 * 60;    // 4:00 PM
+    const preMarketStart = 4 * 60;       // 4:00 AM ET
+    const marketOpen = 9 * 60 + 30;      // 9:30 AM ET
+    const marketClose = 16 * 60;         // 4:00 PM ET
+    const extendedClose = 20 * 60;       // 8:00 PM ET
 
-    if (minutesSinceMidnight < marketOpen || minutesSinceMidnight >= marketClose) {
-      return true;
+    if (mins >= marketOpen && mins < marketClose) {
+      return {
+        isClosed: false,
+        label: '● REGULAR MARKET',
+        badgeBg: 'rgba(48, 209, 88, 0.15)',
+        badgeBorder: 'rgba(48, 209, 88, 0.3)',
+        badgeColor: '#30d158',
+        sessionType: 'REGULAR',
+      };
+    } else if (mins >= preMarketStart && mins < marketOpen) {
+      return {
+        isClosed: true,
+        label: '● PRE-MARKET',
+        badgeBg: 'rgba(10, 132, 255, 0.15)',
+        badgeBorder: 'rgba(10, 132, 255, 0.3)',
+        badgeColor: '#0a84ff',
+        sessionType: 'PRE_MARKET',
+      };
+    } else if (mins >= marketClose && mins < extendedClose) {
+      return {
+        isClosed: true,
+        label: '● EXTENDED HOURS',
+        badgeBg: 'rgba(255, 159, 10, 0.15)',
+        badgeBorder: 'rgba(255, 159, 10, 0.3)',
+        badgeColor: '#ff9f0a',
+        sessionType: 'EXTENDED',
+      };
+    } else {
+      return {
+        isClosed: true,
+        label: '● NIGHT SESSION',
+        badgeBg: 'rgba(191, 90, 242, 0.15)',
+        badgeBorder: 'rgba(191, 90, 242, 0.3)',
+        badgeColor: '#bf5af2',
+        sessionType: 'NIGHT',
+      };
     }
-    return false;
   } catch (e) {
-    const day = new Date().getUTCDay();
-    return day === 0 || day === 6;
+    return {
+      isClosed: true,
+      label: '● MARKET CLOSED',
+      badgeBg: 'rgba(142, 142, 147, 0.15)',
+      badgeBorder: 'rgba(142, 142, 147, 0.3)',
+      badgeColor: '#8e8e93',
+      sessionType: 'WEEKEND',
+    };
   }
+};
+
+export const checkIsMarketClosed = (): boolean => {
+  return getMarketSessionStatus().isClosed;
 };
 
 interface GranularityOption {
@@ -248,9 +309,9 @@ export default function App() {
   const [candleData, setCandleData] = useState<Record<string, Array<{ time: number, open: number, high: number, low: number, close: number }>>>({});
   const [trades, setTrades] = useState<TradeMarker[]>([]);
 
-  const [chartType, setChartType] = useState<"line" | "candlestick">("line");
-  const [selectedGranularity, setSelectedGranularity] = useState<string>("1m");
-  const [selectedInterval, setSelectedInterval] = useState<string>("1m");
+  const [chartType, setChartType] = useState<"line" | "candlestick">("candlestick");
+  const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
+  const [selectedInterval, setSelectedInterval] = useState<string>("30m");
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -920,11 +981,11 @@ export default function App() {
                         fontWeight: 600,
                         padding: '3px 9px',
                         borderRadius: '12px',
-                        backgroundColor: isMarketClosed ? 'rgba(255, 159, 10, 0.15)' : 'rgba(48, 209, 88, 0.15)',
-                        color: isMarketClosed ? '#ff9f0a' : '#30d158',
-                        border: `1px solid ${isMarketClosed ? 'rgba(255, 159, 10, 0.3)' : 'rgba(48, 209, 88, 0.3)'}`
+                        backgroundColor: getMarketSessionStatus().badgeBg,
+                        color: getMarketSessionStatus().badgeColor,
+                        border: `1px solid ${getMarketSessionStatus().badgeBorder}`
                       }}>
-                        {isMarketClosed ? '● EXTENDED HOURS' : '● REGULAR MARKET'}
+                        {getMarketSessionStatus().label}
                       </span>
                     </div>
 
@@ -990,21 +1051,21 @@ export default function App() {
                 </div>
               )}
 
-              {isMarketClosed && (
+              {getMarketSessionStatus().isClosed && (
                 <div style={{
-                  backgroundColor: 'rgba(255, 69, 58, 0.08)',
-                  border: '1px solid rgba(255, 69, 58, 0.2)',
+                  backgroundColor: 'rgba(10, 132, 255, 0.08)',
+                  border: '1px solid rgba(10, 132, 255, 0.2)',
                   borderRadius: '8px',
                   padding: '8px 12px',
                   fontSize: '13px',
-                  color: '#ff453a',
+                  color: '#0a84ff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                   marginBottom: '16px',
                 }}>
-                  <span>⚠️</span>
-                  <span>The market is currently closed. Displaying historical / mock data.</span>
+                  <span>🌙</span>
+                  <span>Off-hours session active ({getMarketSessionStatus().label.replace('● ', '')}). Displaying real historical session bars from recent market open & night trading.</span>
                 </div>
               )}
 

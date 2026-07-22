@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus } from './App';
 
 // Mock lightweight-charts
 jest.mock('lightweight-charts', () => ({
@@ -318,6 +318,9 @@ describe('Bulldog Alpha Web Console', () => {
 
     const isClosed = checkIsMarketClosed();
     expect(typeof isClosed).toBe('boolean');
+
+    const sessionInfo = getMarketSessionStatus();
+    expect(sessionInfo.label).toBeDefined();
   });
 
   test('Admin tab: Subscribe new ticker and view admin logs', async () => {
