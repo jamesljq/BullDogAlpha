@@ -479,6 +479,7 @@ export default function App() {
   const [alpacaFeedLabel, setAlpacaFeedLabel] = useState<string>("IEX Feed (Free 2% Vol)");
 
   const [chartType, setChartType] = useState<"line" | "candlestick">("candlestick");
+  const [showTradeMarkers, setShowTradeMarkers] = useState<boolean>(true);
   const [selectedGranularity, setSelectedGranularity] = useState<string>("1d");
   const [selectedInterval, setSelectedInterval] = useState<string>("30m");
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
@@ -851,6 +852,11 @@ export default function App() {
     }
   };
 
+  const clearSimulatedTrades = () => {
+    setTrades([]);
+    addLog(`Cleared all simulated trade execution markers for ${selectedTicker || 'all symbols'}`);
+  };
+
   const controlMdgStatus = async (action: "pause" | "resume") => {
     try {
       const resp = await fetch("/api/mdg/control", {
@@ -1085,17 +1091,24 @@ export default function App() {
         }
       }
 
-      const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker);
-      const markers = symbolTrades.map(t => ({
-        time: Math.floor(t.timestamp / 1000),
-        position: (t.action === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
-        color: t.action === 'BUY' ? '#30d158' : '#ff453a',
-        shape: (t.action === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
-        text: `${t.action} @ ${t.price}`,
-      }));
-      markers.sort((a, b) => a.time - b.time);
-      if (seriesMarkersRef.current) {
-        seriesMarkersRef.current.setMarkers(markers);
+      if (!showTradeMarkers) {
+        if (seriesMarkersRef.current) {
+          seriesMarkersRef.current.setMarkers([]);
+        }
+      } else {
+        const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === selectedTicker);
+        const markers = symbolTrades.map(t => ({
+          time: Math.floor(t.timestamp / 1000),
+          position: (t.action === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+          color: t.action === 'BUY' ? '#30d158' : '#ff453a',
+          shape: 'circle' as 'circle',
+          size: 0.8,
+          text: `${t.action === 'BUY' ? 'B' : 'S'} $${t.price.toFixed(2)}`,
+        }));
+        markers.sort((a, b) => a.time - b.time);
+        if (seriesMarkersRef.current) {
+          seriesMarkersRef.current.setMarkers(markers);
+        }
       }
     }
   }, [selectedTicker, selectedGranularity, tickData, candleData, trades, activeSeries, chartType]);
@@ -1284,26 +1297,28 @@ export default function App() {
               {selectedTicker && (
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: 0, letterSpacing: '-0.5px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}>
+                      <h2 style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: 0, letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
                         {currentStockStats.name} ({selectedTicker})
                       </h2>
                       <span style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        padding: '3px 9px',
+                        padding: '3px 8px',
                         borderRadius: '12px',
                         backgroundColor: marketInfo.badgeBg,
                         color: marketInfo.badgeColor,
-                        border: `1px solid ${marketInfo.badgeBorder}`
+                        border: `1px solid ${marketInfo.badgeBorder}`,
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1,
                       }}>
-                        {marketInfo.label}
+                        {marketInfo.label.replace('REGULAR MARKET', 'Regular').replace('AFTER-HOURS / NIGHT TRADING', 'Extended').replace('MARKET CLOSED', 'Closed')}
                       </span>
                       {dataSourceInfo.isMock ? (
                         <span style={{
                           fontSize: '11px',
                           fontWeight: 700,
-                          padding: '3px 9px',
+                          padding: '3px 8px',
                           borderRadius: '12px',
                           backgroundColor: 'rgba(255, 159, 10, 0.15)',
                           color: '#ff9f0a',
@@ -1311,15 +1326,17 @@ export default function App() {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '4px',
+                          whiteSpace: 'nowrap',
+                          lineHeight: 1,
                         }} title="Currently displaying simulated mock bars. Configure Polygon/Alpaca API keys in Admin tab for live feeds.">
-                          <span>⚠️ MOCK DATA MODE</span>
+                          <span>⚠️ Mock</span>
                         </span>
                       ) : (
                         <>
                           <span style={{
                             fontSize: '11px',
                             fontWeight: 700,
-                            padding: '3px 9px',
+                            padding: '3px 8px',
                             borderRadius: '12px',
                             backgroundColor: 'rgba(48, 209, 88, 0.15)',
                             color: '#30d158',
@@ -1327,14 +1344,16 @@ export default function App() {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px',
+                            whiteSpace: 'nowrap',
+                            lineHeight: 1,
                           }} title="Currently displaying real-time market data from Polygon / Alpaca APIs.">
-                            <span>⚡ REAL LIVE DATA ({dataSourceInfo.source.toUpperCase()})</span>
+                            <span>⚡ Real ({dataSourceInfo.source.toUpperCase()})</span>
                           </span>
                           {dataSourceInfo.source === "alpaca" && (
                             <span style={{
                               fontSize: '11px',
                               fontWeight: 700,
-                              padding: '3px 9px',
+                              padding: '3px 8px',
                               borderRadius: '12px',
                               backgroundColor: 'rgba(10, 132, 255, 0.15)',
                               color: '#0a84ff',
@@ -1342,8 +1361,10 @@ export default function App() {
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px',
+                              whiteSpace: 'nowrap',
+                              lineHeight: 1,
                             }} title="Alpaca Market Data Feed Mode (--alpaca-feed). Free accounts use IEX feed (~2-3% vol). Paid Unlimited accounts receive 100% NBBO SIP feed.">
-                              <span>📊 {alpacaFeedLabel}</span>
+                              <span>📊 {alpacaFeedLabel.replace(' (Auto-Fallback 2% Vol)', ' (Auto)').replace(' (Free 2% Vol)', '').replace(' (Paid 100% NBBO)', '')}</span>
                             </span>
                           )}
                         </>
@@ -1351,6 +1372,27 @@ export default function App() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button
+                        className="apple-btn"
+                        onClick={() => setShowTradeMarkers(prev => !prev)}
+                        style={{
+                          backgroundColor: showTradeMarkers ? 'rgba(10, 132, 255, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                          border: `1px solid ${showTradeMarkers ? 'rgba(10, 132, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                          color: showTradeMarkers ? '#0a84ff' : '#aeaeb2',
+                          borderRadius: '10px',
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title="Toggle display of Buy/Sell trade execution markers on the chart"
+                      >
+                        <span>{showTradeMarkers ? '👁️ Markers ON' : '🙈 Markers OFF'}</span>
+                      </button>
                       {/* TradingView Bar Interval Dropdown */}
                       <select
                         value={selectedInterval}
@@ -1545,7 +1587,7 @@ export default function App() {
             {selectedTicker && (
               <div style={styles.card}>
                 <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '16px' }}>Trade {selectedTicker}</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <button
                     className="apple-btn"
                     onClick={() => executeSimulatedTrade("BUY")}
@@ -1560,13 +1602,80 @@ export default function App() {
                   >
                     🔴 SIMULATE SELL 100
                   </button>
+                  <button
+                    className="apple-btn"
+                    onClick={clearSimulatedTrades}
+                    style={{
+                      ...styles.actionBtn,
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: '#8e8e93',
+                      width: '100%',
+                      height: '32px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      marginTop: '4px'
+                    }}
+                    title="Clear all simulated trade execution markers"
+                  >
+                    🗑️ CLEAR SIMULATED TRADES
+                  </button>
                 </div>
               </div>
             )}
 
             {/* Watchlist */}
             <div style={styles.card}>
-              <h3 style={{ ...styles.cardTitle, fontSize: '16px', marginBottom: '12px' }}>Watchlist</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <h3 style={{ ...styles.cardTitle, fontSize: '16px', margin: 0 }}>Watchlist</h3>
+                <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>{subscriptions.length} tickers</span>
+              </div>
+
+              {/* Quick Add Ticker Input Bar */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                <input
+                  type="text"
+                  placeholder="Add stock (e.g. NVDA)"
+                  value={newTickerInput}
+                  onChange={(e) => setNewTickerInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newTickerInput.trim()) {
+                      addSubscription(newTickerInput.trim());
+                    }
+                  }}
+                  style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: '8px',
+                    color: '#ffffff',
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    flexGrow: 1,
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  className="apple-btn"
+                  onClick={() => {
+                    if (newTickerInput.trim()) {
+                      addSubscription(newTickerInput.trim());
+                    }
+                  }}
+                  style={{
+                    backgroundColor: '#30d158',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {subscriptions.map(sym => {
                   let latestPrice = 0.0;
@@ -1615,11 +1724,33 @@ export default function App() {
                       }}
                     >
                       <span style={{ fontWeight: 600, color: '#ffffff' }}>{sym}</span>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                        <span style={{ fontSize: '14px', fontWeight: 600 }}>${latestPrice.toFixed(2)}</span>
-                        <span style={{ fontSize: '11px', color: isUp ? '#30d158' : '#ff453a' }}>
-                          {isUp ? '+' : ''}{changePercent.toFixed(2)}%
-                        </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 600 }}>${latestPrice.toFixed(2)}</span>
+                          <span style={{ fontSize: '11px', color: isUp ? '#30d158' : '#ff453a' }}>
+                            {isUp ? '+' : ''}{changePercent.toFixed(2)}%
+                          </span>
+                        </div>
+                        <button
+                          className="apple-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeSubscription(sym);
+                          }}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            color: '#8e8e93',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            padding: '3px 7px',
+                            borderRadius: '6px',
+                            lineHeight: 1,
+                          }}
+                          title={`Remove ${sym} from Watchlist`}
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
                   );

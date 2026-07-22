@@ -378,7 +378,7 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
     // Verify Real Live Data badge is displayed when real data is returned
-    expect(screen.getByText(/REAL LIVE DATA/i)).toBeInTheDocument();
+    expect(screen.getByText(/⚡ Real \(/i)).toBeInTheDocument();
 
     // Navigate to Admin tab and toggle Force Simulated Mock Mode
     await act(async () => {
@@ -672,5 +672,84 @@ describe('Bulldog Alpha Web Console', () => {
     const simulatedBanner = await screen.findByText(/Displaying simulated off-hours session bars/i);
     expect(simulatedBanner).toBeInTheDocument();
     expect(screen.queryByText(/Displaying real historical session bars/i)).not.toBeInTheDocument();
+  });
+
+  test('Right Sidebar Watchlist delete button (✕) unsubscribes and removes ticker', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string, opts: any) => {
+      if (url.includes('/api/mdg/subscriptions') && opts?.body) {
+        const body = JSON.parse(opts.body);
+        if (body.action === 'remove' && body.ticker === 'AAPL') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ success: true, tickers: ['META'] }),
+          });
+        }
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL', 'META'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const removeButtons = screen.getAllByTitle(/Remove AAPL from Watchlist/i);
+    expect(removeButtons.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(removeButtons[0]);
+    });
+
+    expect(screen.getByText(/Unsubscribed from ticker: AAPL/i)).toBeInTheDocument();
+  });
+
+  test('Trade execution markers toggle button switches between Markers ON and Markers OFF', async () => {
+    (global as any).fetch = jest.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+    }));
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const toggleBtn = screen.getByText(/👁️ Markers ON/i);
+    expect(toggleBtn).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(toggleBtn);
+    });
+
+    expect(screen.getByText(/🙈 Markers OFF/i)).toBeInTheDocument();
+  });
+
+  test('Clear Simulated Trades button resets execution markers and logs status', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/trades')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true, trades: [{ symbol: 'AAPL', action: 'BUY', price: 324.5, timestamp: Date.now() }] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const clearBtn = await screen.findByText(/🗑️ CLEAR SIMULATED TRADES/i);
+    expect(clearBtn).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+
+    expect(screen.getByText(/Cleared all simulated trade execution markers/i)).toBeInTheDocument();
   });
 });
