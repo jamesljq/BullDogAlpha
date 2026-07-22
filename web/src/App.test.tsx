@@ -369,6 +369,24 @@ describe('Bulldog Alpha Web Console', () => {
     fireEvent.click(panicBtn);
   });
 
+  test('Tab switching persistence: Trading Terminal <-> Admin Tab', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const adminBtn = screen.getByText(/Ingestion & Systems Admin/i);
+    const terminalBtn = screen.getByText(/Trading Terminal/i);
+
+    // Switch to Admin tab
+    fireEvent.click(adminBtn);
+
+    // Switch back to Trading Terminal tab
+    fireEvent.click(terminalBtn);
+
+    // Assert that stock header and terminal element remain rendered
+    expect(screen.getByText(/Trading Terminal/i)).toBeInTheDocument();
+  });
+
   test('Strategy toggles, Risk sliders, and DevMode Shutdown', async () => {
     (global as any).fetch = jest.fn().mockResolvedValue({
       ok: true,

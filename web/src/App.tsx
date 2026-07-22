@@ -41,10 +41,10 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
     if (day === 0 || day === 6) {
       return {
         isClosed: true,
-        label: '● WEEKEND CLOSED',
+        label: '🏖️ WEEKEND CLOSED',
         badgeBg: 'rgba(142, 142, 147, 0.15)',
-        badgeBorder: 'rgba(142, 142, 147, 0.3)',
-        badgeColor: '#8e8e93',
+        badgeBorder: 'rgba(142, 142, 147, 0.35)',
+        badgeColor: '#aeaeb2',
         sessionType: 'WEEKEND',
       };
     }
@@ -61,36 +61,36 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
     if (mins >= marketOpen && mins < marketClose) {
       return {
         isClosed: false,
-        label: '● REGULAR MARKET',
+        label: '🟢 REGULAR MARKET',
         badgeBg: 'rgba(48, 209, 88, 0.15)',
-        badgeBorder: 'rgba(48, 209, 88, 0.3)',
+        badgeBorder: 'rgba(48, 209, 88, 0.35)',
         badgeColor: '#30d158',
         sessionType: 'REGULAR',
       };
     } else if (mins >= preMarketStart && mins < marketOpen) {
       return {
         isClosed: true,
-        label: '● PRE-MARKET',
+        label: '🌅 PRE-MARKET',
         badgeBg: 'rgba(10, 132, 255, 0.15)',
-        badgeBorder: 'rgba(10, 132, 255, 0.3)',
+        badgeBorder: 'rgba(10, 132, 255, 0.35)',
         badgeColor: '#0a84ff',
         sessionType: 'PRE_MARKET',
       };
     } else if (mins >= marketClose && mins < extendedClose) {
       return {
         isClosed: true,
-        label: '● EXTENDED HOURS',
+        label: '🌆 EXTENDED HOURS',
         badgeBg: 'rgba(255, 159, 10, 0.15)',
-        badgeBorder: 'rgba(255, 159, 10, 0.3)',
+        badgeBorder: 'rgba(255, 159, 10, 0.35)',
         badgeColor: '#ff9f0a',
         sessionType: 'EXTENDED',
       };
     } else {
       return {
         isClosed: true,
-        label: '● NIGHT SESSION',
+        label: '🌙 NIGHT SESSION',
         badgeBg: 'rgba(191, 90, 242, 0.15)',
-        badgeBorder: 'rgba(191, 90, 242, 0.3)',
+        badgeBorder: 'rgba(191, 90, 242, 0.35)',
         badgeColor: '#bf5af2',
         sessionType: 'NIGHT',
       };
@@ -98,10 +98,10 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
   } catch (e) {
     return {
       isClosed: true,
-      label: '● MARKET CLOSED',
+      label: '🏖️ WEEKEND CLOSED',
       badgeBg: 'rgba(142, 142, 147, 0.15)',
-      badgeBorder: 'rgba(142, 142, 147, 0.3)',
-      badgeColor: '#8e8e93',
+      badgeBorder: 'rgba(142, 142, 147, 0.35)',
+      badgeColor: '#aeaeb2',
       sessionType: 'WEEKEND',
     };
   }
@@ -281,12 +281,46 @@ export default function App() {
       if (resp.ok) {
         const data = await resp.json();
         if (data && data.label) {
+          let bg = 'rgba(48, 209, 88, 0.15)';
+          let border = 'rgba(48, 209, 88, 0.35)';
+          let color = '#30d158';
+          let label = data.label;
+
+          if (data.session_type === 'HOLIDAY') {
+            bg = 'rgba(255, 69, 58, 0.15)';
+            border = 'rgba(255, 69, 58, 0.35)';
+            color = '#ff453a';
+            if (!label.startsWith('🎉')) label = `🎉 ${label.replace('● ', '')}`;
+          } else if (data.session_type === 'WEEKEND') {
+            bg = 'rgba(142, 142, 147, 0.15)';
+            border = 'rgba(142, 142, 147, 0.35)';
+            color = '#aeaeb2';
+            if (!label.startsWith('🏖️')) label = `🏖️ ${label.replace('● ', '')}`;
+          } else if (data.session_type === 'PRE_MARKET') {
+            bg = 'rgba(10, 132, 255, 0.15)';
+            border = 'rgba(10, 132, 255, 0.35)';
+            color = '#0a84ff';
+            if (!label.startsWith('🌅')) label = `🌅 ${label.replace('● ', '')}`;
+          } else if (data.session_type === 'EXTENDED') {
+            bg = 'rgba(255, 159, 10, 0.15)';
+            border = 'rgba(255, 159, 10, 0.35)';
+            color = '#ff9f0a';
+            if (!label.startsWith('🌆')) label = `🌆 ${label.replace('● ', '')}`;
+          } else if (data.session_type === 'NIGHT' || label.includes('NIGHT')) {
+            bg = 'rgba(191, 90, 242, 0.15)';
+            border = 'rgba(191, 90, 242, 0.35)';
+            color = '#bf5af2';
+            if (!label.startsWith('🌙')) label = `🌙 ${label.replace('● ', '')}`;
+          } else if (data.session_type === 'REGULAR') {
+            if (!label.startsWith('🟢')) label = `🟢 ${label.replace('● ', '')}`;
+          }
+
           setMarketInfo({
             isClosed: data.is_closed,
-            label: data.label,
-            badgeBg: data.is_closed ? (data.session_type === 'HOLIDAY' ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 159, 10, 0.15)') : 'rgba(48, 209, 88, 0.15)',
-            badgeBorder: data.is_closed ? (data.session_type === 'HOLIDAY' ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 159, 10, 0.3)') : 'rgba(48, 209, 88, 0.3)',
-            badgeColor: data.is_closed ? (data.session_type === 'HOLIDAY' ? '#ff453a' : '#ff9f0a') : '#30d158',
+            label: label,
+            badgeBg: bg,
+            badgeBorder: border,
+            badgeColor: color,
             sessionType: data.session_type || 'REGULAR',
           });
           return;
@@ -804,7 +838,7 @@ export default function App() {
         console.warn("Vite Lightweight charts skipped (jsdom test environment detected):", e);
       }
     }
-  }, [chartType]);
+  }, [chartType, activeTab]);
 
   // Update active series tick/candle data & execution markers
   useEffect(() => {
