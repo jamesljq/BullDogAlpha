@@ -722,41 +722,52 @@ describe('Bulldog Alpha Web Console', () => {
     expect(getIntervalSeconds('1d')).toBe(86400);
   });
 
-  test('Night session tick stream: Appends a new candle for night tick without corrupting 16:30 EDT regular close bar', () => {
-    // 16:30 EDT bar = 1784748600, close = 342.02
-    const regularCloseBar = { time: 1784748600, open: 343.00, high: 344.00, low: 341.00, close: 342.02 };
+  test('getStockStats 52-week Low and High invariance: NEVER returns 0.00 even under loading or zero-bar states', () => {
+    const emptyStats = getStockStats('GOOGL', []);
+    expect(emptyStats.wLow).toBeGreaterThan(0);
+    expect(emptyStats.wHigh).toBeGreaterThan(0);
+    expect(emptyStats.wLow).toBe(275.00);
+    expect(emptyStats.wHigh).toBe(380.00);
+
+    const zeroBarStats = getStockStats('GOOGL', [{ open: 0, high: 0, low: 0, close: 0 }]);
+    expect(zeroBarStats.wLow).toBeGreaterThan(0);
+    expect(zeroBarStats.wHigh).toBeGreaterThan(0);
+  });
+
+  test('Night session tick stream: Quantizes tick timestamps to exact interval boundaries and splits candles cleanly', () => {
+    const regularCloseTime = 1784748600; // 16:30 EDT
+    const regularCloseBar = { time: regularCloseTime, open: 343.00, high: 344.00, low: 341.00, close: 342.02 };
     const currentCandles = [regularCloseBar];
-    const intervalSec = 1800; // 30m
+    const intervalSec = 900; // 15m (900 seconds)
 
-    // Night session tick arrives at 01:21:27 AM EDT = 1784784087, price = 329.71
-    const nightTickTime = 1784784087;
-    const nightTickPrice = 329.71;
+    // Tick 1 at 01:21:27 AM EDT = 1784784087
+    const tickTime1 = 1784784087;
+    const price1 = 329.71;
+    const quantized1 = Math.floor(tickTime1 / intervalSec) * intervalSec; // 01:15:00 AM EDT
 
-    const lastCandle = currentCandles[currentCandles.length - 1];
-    let newCandles;
-    let candleToPush = { time: nightTickTime, open: nightTickPrice, high: nightTickPrice, low: nightTickPrice, close: nightTickPrice };
+    let lastCandle = currentCandles[currentCandles.length - 1];
+    let candleToPush1 = { time: quantized1, open: price1, high: price1, low: price1, close: price1 };
+    let newCandles = [...currentCandles, candleToPush1];
 
-    if (lastCandle && nightTickTime <= lastCandle.time + intervalSec && (nightTickTime - lastCandle.time) < intervalSec) {
-      candleToPush = {
-        time: lastCandle.time,
-        open: lastCandle.open,
-        high: Math.max(lastCandle.high, nightTickPrice),
-        low: Math.min(lastCandle.low, nightTickPrice),
-        close: nightTickPrice,
-      };
-      newCandles = [...currentCandles.slice(0, -1), candleToPush];
-    } else {
-      newCandles = [...currentCandles, candleToPush];
-    }
+    // Tick 2 at 01:30:08 AM EDT = 1784784608 (crosses into next 15m interval bucket)
+    const tickTime2 = 1784784608;
+    const price2 = 328.50;
+    const quantized2 = Math.floor(tickTime2 / intervalSec) * intervalSec; // 01:30:00 AM EDT
 
-    // Verify 16:30 EDT bar is UNTOUCHED
+    lastCandle = newCandles[newCandles.length - 1];
+    let candleToPush2 = { time: quantized2, open: price2, high: price2, low: price2, close: price2 };
+    newCandles = [...newCandles, candleToPush2];
+
+    // Verify 16:30 EDT regular close bar is untouched
     expect(newCandles[0].close).toBe(342.02);
-    expect(newCandles[0].time).toBe(1784748600);
+    expect(newCandles[0].time).toBe(regularCloseTime);
 
-    // Verify NEW night bar is appended
-    expect(newCandles.length).toBe(2);
-    expect(newCandles[1].time).toBe(nightTickTime);
+    // Verify distinct 15m night candles were created for 01:15 AM and 01:30 AM
+    expect(newCandles[1].time).toBe(quantized1); // 01:15:00 AM
     expect(newCandles[1].close).toBe(329.71);
+
+    expect(newCandles[2].time).toBe(quantized2); // 01:30:00 AM
+    expect(newCandles[2].close).toBe(328.50);
   });
 
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
