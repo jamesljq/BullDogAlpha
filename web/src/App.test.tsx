@@ -5,22 +5,24 @@ import '@testing-library/jest-dom';
 import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP, aggregateTradeMarkers, TradeMarker } from './App';
 
 const mockFitContent = jest.fn();
+const mockRemoveChart = jest.fn();
+const mockCreateChart = jest.fn(() => ({
+  addSeries: jest.fn(() => ({
+    setData: jest.fn(),
+    update: jest.fn(),
+    setMarkers: jest.fn(),
+  })),
+  applyOptions: jest.fn(),
+  timeScale: jest.fn(() => ({
+    fitContent: mockFitContent,
+    setVisibleRange: jest.fn(),
+  })),
+  remove: mockRemoveChart,
+}));
 
 // Mock lightweight-charts
 jest.mock('lightweight-charts', () => ({
-  createChart: jest.fn(() => ({
-    addSeries: jest.fn(() => ({
-      setData: jest.fn(),
-      update: jest.fn(),
-      setMarkers: jest.fn(),
-    })),
-    applyOptions: jest.fn(),
-    timeScale: jest.fn(() => ({
-      fitContent: mockFitContent,
-      setVisibleRange: jest.fn(),
-    })),
-    remove: jest.fn(),
-  })),
+  createChart: (...args: any[]) => mockCreateChart(...args),
   LineSeries: 'LineSeries',
   CandlestickSeries: 'CandlestickSeries',
   createSeriesMarkers: jest.fn(),
@@ -461,6 +463,9 @@ describe('Bulldog Alpha Web Console', () => {
     expect(terminalPanel.style.display).toBe('grid');
     expect(adminPanel.style.display).toBe('none');
 
+    const initialCreateCount = mockCreateChart.mock.calls.length;
+    const initialRemoveCount = mockRemoveChart.mock.calls.length;
+
     // Switch to Admin tab
     fireEvent.click(adminBtn);
 
@@ -469,13 +474,20 @@ describe('Bulldog Alpha Web Console', () => {
     expect(adminPanel.style.display).toBe('block');
     expect(screen.getByText(/Market Data Ingestion Console \(MDG\)/i)).toBeInTheDocument();
 
+    // Assert that chart instance was NOT destroyed upon switching to Admin tab
+    expect(mockRemoveChart.mock.calls.length).toBe(initialRemoveCount);
+
     // Switch back to Trading Terminal tab
     fireEvent.click(terminalBtn);
 
-    // Assert that Terminal container becomes visible again without DOM re-mount
+    // Assert that Terminal container becomes visible again without DOM re-mount or chart re-creation
     expect(terminalPanel.style.display).toBe('grid');
     expect(adminPanel.style.display).toBe('none');
     expect(screen.getByText(/Trading Terminal/i)).toBeInTheDocument();
+
+    // Assert that createChart was NOT called again when returning to Trading Terminal tab
+    expect(mockCreateChart.mock.calls.length).toBe(initialCreateCount);
+    expect(mockRemoveChart.mock.calls.length).toBe(initialRemoveCount);
   });
 
   test('Strategy toggles, Risk sliders, and DevMode Shutdown', async () => {
