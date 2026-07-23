@@ -334,13 +334,13 @@ export const STOCK_NAMES: Record<string, string> = {
   META: 'Meta Platforms, Inc.',
 };
 
-export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata => {
+export const getStockStats = (ticker: string, candleRaw?: any[], candles1Y?: any[]): StockMetadata => {
   const name = STOCK_NAMES[ticker] || `${ticker} Corp.`;
   
   const fallbackPrices: Record<string, { price: number; wHigh: number; wLow: number }> = {
     AAPL: { price: 325.86, wHigh: 350.00, wLow: 220.00 },
-    GOOGL: { price: 342.02, wHigh: 380.00, wLow: 275.00 },
-    GOOG: { price: 342.02, wHigh: 380.00, wLow: 275.00 },
+    GOOGL: { price: 342.02, wHigh: 397.89, wLow: 275.00 },
+    GOOG: { price: 342.02, wHigh: 397.89, wLow: 275.00 },
     META: { price: 622.77, wHigh: 720.00, wLow: 450.00 },
     NVDA: { price: 212.59, wHigh: 250.00, wLow: 110.00 },
     MSFT: { price: 445.00, wHigh: 470.00, wLow: 380.00 },
@@ -349,6 +349,20 @@ export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata 
   };
 
   const base = fallbackPrices[ticker] || { price: 150.00, wHigh: 180.00, wLow: 120.00 };
+
+  let wHigh = base.wHigh;
+  let wLow = base.wLow;
+
+  const dataset1Y = (candles1Y && candles1Y.length > 0) ? candles1Y : (candleRaw && candleRaw.length > 0 ? candleRaw : []);
+  if (dataset1Y.length > 0) {
+    const valid1Y = dataset1Y.filter(c => (c.high || c.close || c.value || 0) > 0);
+    if (valid1Y.length > 0) {
+      const highs1Y = valid1Y.map(c => c.high || c.close || c.value || 0).filter(h => h > 0);
+      const lows1Y = valid1Y.map(c => c.low || c.close || c.value || 0).filter(l => l > 0);
+      if (highs1Y.length > 0) wHigh = Math.max(...highs1Y);
+      if (lows1Y.length > 0) wLow = Math.min(...lows1Y);
+    }
+  }
 
   if (candleRaw && candleRaw.length > 0) {
     const validCandles = candleRaw.filter(c => (c.close || c.value || c.high || c.low || 0) > 0);
@@ -368,8 +382,8 @@ export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata 
         open,
         high,
         low,
-        wHigh: parseFloat(Math.max(high * 1.15, base.wHigh).toFixed(2)),
-        wLow: parseFloat(Math.min(low * 0.85, base.wLow).toFixed(2)),
+        wHigh: parseFloat(Math.max(wHigh, high).toFixed(2)),
+        wLow: parseFloat(Math.min(wLow, low).toFixed(2)),
         pe: 28.5,
         volume: '35.4M',
         marketCap: '$2.50T',
@@ -384,8 +398,8 @@ export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata 
     open: base.price,
     high: base.price,
     low: base.price,
-    wHigh: base.wHigh,
-    wLow: base.wLow,
+    wHigh,
+    wLow,
     pe: 28.5,
     volume: '35.4M',
     marketCap: '$2.50T',
@@ -776,8 +790,35 @@ export default function App() {
         const data = await resp.json();
           if (data.success && data.bars) {
             const key = `${ticker}_${granularity}`;
-            const lineBars = data.bars.map((b: any) => ({ time: b.time, value: b.close }));
-            const candleBars = data.bars.map((b: any) => ({
+            
+            // Fill intermediate night session granularity bars if gap exists up to current time
+            let processedBars = [...data.bars];
+            const intervalSec = getIntervalSeconds(interval);
+            if (processedBars.length > 0 && (granularity === "1d" || granularity === "1w")) {
+              const lastBar = processedBars[processedBars.length - 1];
+              const nowSec = Math.floor(Date.now() / 1000);
+              const quantizedNow = Math.floor(nowSec / intervalSec) * intervalSec;
+              
+              if (quantizedNow > lastBar.time + intervalSec && (quantizedNow - lastBar.time) <= 18 * 3600) {
+                const filled: any[] = [];
+                let stepTime = lastBar.time + intervalSec;
+                const fillPrice = lastBar.close;
+                while (stepTime < quantizedNow && filled.length < 120) {
+                  filled.push({
+                    time: stepTime,
+                    open: fillPrice,
+                    high: fillPrice,
+                    low: fillPrice,
+                    close: fillPrice,
+                  });
+                  stepTime += intervalSec;
+                }
+                processedBars = [...processedBars, ...filled];
+              }
+            }
+
+            const lineBars = processedBars.map((b: any) => ({ time: b.time, value: b.close }));
+            const candleBars = processedBars.map((b: any) => ({
               time: b.time,
               open: b.open,
               high: b.high,
@@ -787,6 +828,18 @@ export default function App() {
 
             setTickData(prev => ({ ...prev, [key]: lineBars }));
             setCandleData(prev => ({ ...prev, [key]: candleBars }));
+
+            // Pre-fetch 1Y daily data in background if not loaded to compute accurate 52-week High/Low
+            if (granularity !== "1y" && !candleData[`${ticker}_1y`]) {
+              fetch(`/api/mdg/history?ticker=${ticker}&granularity=1y&interval=1d${modeParam}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                  if (d && d.success && d.bars) {
+                    const c1y = d.bars.map((b: any) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+                    setCandleData(prev => ({ ...prev, [`${ticker}_1y`]: c1y }));
+                  }
+                }).catch(() => {});
+            }
 
             const isMock = data.is_mock ?? (data.source === "mock");
             const sourceName = data.source || (isMock ? "mock" : activeVendor);
@@ -799,9 +852,9 @@ export default function App() {
             if (isMock) {
               addLog(`Loaded simulated mock historical bars for ${ticker} (${granularity}, ${interval})`);
             } else {
-              addLog(`Loaded REAL live market bars for ${ticker} (${data.bars.length} bars) via ${sourceName.toUpperCase()}`);
+              addLog(`Loaded REAL live market bars for ${ticker} (${processedBars.length} bars) via ${sourceName.toUpperCase()}`);
             }
-            return data.bars.length > 0;
+            return processedBars.length > 0;
           }
         }
       } catch (e) {
@@ -1507,10 +1560,11 @@ export default function App() {
   };
 
   const periodInfo = getPeriodChangeInfo();
-  const baseStats = getStockStats(selectedTicker);
   const intradayKey = `${selectedTicker}_1d`;
   const intradayCandles = candleData[intradayKey] || [];
   const activeKey = `${selectedTicker}_${selectedGranularity}`;
+  const candles1Y = candleData[`${selectedTicker}_1y`] || candleData[`${selectedTicker}_1Y`] || [];
+  const baseStats = getStockStats(selectedTicker, candleData[activeKey] || intradayCandles, candles1Y);
   const rawDataForStats = tickData[activeKey] || tickData[intradayKey] || [];
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
@@ -1526,8 +1580,21 @@ export default function App() {
   }
 
   const currentPrice = periodInfo.currentPrice;
-  const wHigh = currentPrice > 0 ? Math.max(currentPrice, dailyHigh, baseStats.wHigh) : baseStats.wHigh;
-  const wLow = (currentPrice > 0 && dailyLow > 0) ? Math.min(currentPrice, dailyLow, baseStats.wLow) : baseStats.wLow;
+
+  let computedWHigh = baseStats.wHigh;
+  let computedWLow = baseStats.wLow;
+
+  if (candles1Y.length > 0) {
+    const valid1YHighs = candles1Y.map((c: any) => c.high || c.close || c.value || 0).filter((h: number) => h > 0);
+    const valid1YLows = candles1Y.map((c: any) => c.low || c.close || c.value || 0).filter((l: number) => l > 0);
+    if (valid1YHighs.length > 0) computedWHigh = Math.max(...valid1YHighs);
+    if (valid1YLows.length > 0) computedWLow = Math.min(...valid1YLows);
+  }
+
+  const wHigh = Math.max(computedWHigh, currentPrice || 0, dailyHigh || 0);
+  const wLow = (currentPrice > 0 && dailyLow > 0)
+    ? Math.min(computedWLow, currentPrice, dailyLow)
+    : computedWLow;
 
   const keyStats = {
     ...baseStats,

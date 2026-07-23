@@ -1444,20 +1444,22 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 		step = totalDuration / 20
 	}
 
-	basePrice := 224.50
+	basePrice := 342.02
 	switch ticker {
 	case "AAPL":
-		basePrice = 224.50
+		basePrice = 325.86
 	case "MSFT":
-		basePrice = 448.37
+		basePrice = 445.00
 	case "NVDA":
-		basePrice = 122.50
+		basePrice = 212.59
 	case "TSLA":
-		basePrice = 251.50
+		basePrice = 250.00
 	case "AMZN":
-		basePrice = 186.40
+		basePrice = 185.00
+	case "META":
+		basePrice = 622.77
 	case "GOOG", "GOOGL":
-		basePrice = 178.60
+		basePrice = 342.02
 	}
 
 	bars := make([]ClientBar, 0, count)

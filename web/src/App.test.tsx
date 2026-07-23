@@ -727,11 +727,22 @@ describe('Bulldog Alpha Web Console', () => {
     expect(emptyStats.wLow).toBeGreaterThan(0);
     expect(emptyStats.wHigh).toBeGreaterThan(0);
     expect(emptyStats.wLow).toBe(275.00);
-    expect(emptyStats.wHigh).toBe(380.00);
+    expect(emptyStats.wHigh).toBe(397.89);
 
     const zeroBarStats = getStockStats('GOOGL', [{ open: 0, high: 0, low: 0, close: 0 }]);
     expect(zeroBarStats.wLow).toBeGreaterThan(0);
     expect(zeroBarStats.wHigh).toBeGreaterThan(0);
+  });
+
+  test('getStockStats dynamically evaluates 52-week High from 1Y daily dataset (e.g. 397.89 on May 7)', () => {
+    const candles1Y = [
+      { time: 1778160000, high: 320.00, low: 280.00, close: 315.00 },
+      { time: 1778246400, high: 397.89, low: 350.00, close: 395.00 }, // May 7 peak
+      { time: 1778332800, high: 370.00, low: 330.00, close: 342.02 },
+    ];
+    const stats1Y = getStockStats('GOOGL', [], candles1Y);
+    expect(stats1Y.wHigh).toBe(397.89);
+    expect(stats1Y.wLow).toBe(280.00);
   });
 
   test('Night session tick stream: Quantizes tick timestamps to exact interval boundaries and splits candles cleanly', () => {
