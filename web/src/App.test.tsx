@@ -650,6 +650,34 @@ describe('Bulldog Alpha Web Console', () => {
     expect(offlineBadges.length).toBeGreaterThan(0);
   });
 
+  test('Browser Online Event & Auto-Healing Resync: Triggers resyncData, restores live status badges, re-fetches market data, and displays NETWORK RESTORED toast notification', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // 1. Simulate offline event
+    await act(async () => {
+      window.dispatchEvent(new Event('offline'));
+    });
+    expect(screen.getByText(/LOCAL WI-FI DISCONNECTED/i)).toBeInTheDocument();
+
+    // Reset fetch mock counter
+    (global as any).fetch.mockClear();
+
+    // 2. Simulate online event (turning Wi-Fi back on)
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    // Verify fetch was re-triggered for resync
+    expect((global as any).fetch).toHaveBeenCalled();
+
+    // Verify Toast notification 'NETWORK RESTORED' is rendered
+    await waitFor(() => {
+      expect(screen.getByText(/NETWORK RESTORED/i)).toBeInTheDocument();
+    });
+  });
+
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
     const stats = getStockStats('AAPL');
     expect(stats).toHaveProperty('currentPrice');
