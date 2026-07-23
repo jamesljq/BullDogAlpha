@@ -1182,7 +1182,18 @@ export default function App() {
         console.warn("Vite Lightweight charts skipped (jsdom test environment detected):", e);
       }
     }
-  }, [chartType, activeTab]);
+  }, [chartType]);
+
+  // When returning to Trading Terminal tab, re-apply width options without re-creating chart or resetting viewport
+  useEffect(() => {
+    if (activeTab === "terminal" && chartContainerRef.current && chartRef.current) {
+      try {
+        chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [activeTab]);
 
   // Flag viewport fitting whenever ticker, granularity, bar interval, or chart type changes
   useEffect(() => {
