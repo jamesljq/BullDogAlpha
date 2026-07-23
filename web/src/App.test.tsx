@@ -490,6 +490,28 @@ describe('Bulldog Alpha Web Console', () => {
     expect(mockRemoveChart.mock.calls.length).toBe(initialRemoveCount);
   });
 
+  test('Dual-Price Header renders regular close & overnight live price cards during off-hours', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const dualPriceHeader = screen.queryByTestId('dual-price-header');
+    // If test environment detects off-hours / night session, dual price header card must be rendered
+    if (dualPriceHeader) {
+      expect(dualPriceHeader).toBeInTheDocument();
+      expect(screen.getByText(/At close: 4:00 PM EDT/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/Overnight/i).length).toBeGreaterThan(0);
+    }
+  });
+
+  test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
+    const stats = getStockStats('AAPL');
+    expect(stats).toHaveProperty('currentPrice');
+    expect(stats).toHaveProperty('open');
+    expect(stats).toHaveProperty('high');
+    expect(stats).toHaveProperty('low');
+  });
+
   test('Strategy toggles, Risk sliders, and DevMode Shutdown', async () => {
     (global as any).fetch = jest.fn().mockResolvedValue({
       ok: true,

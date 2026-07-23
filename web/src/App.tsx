@@ -643,6 +643,13 @@ export default function App() {
       startPrice = baseStats.open;
     }
 
+    const closePrice = baseStats.currentPrice > 0 ? baseStats.currentPrice : (currentPrice > 0 ? currentPrice : baseStats.open);
+    const closeChange = closePrice - baseStats.open;
+    const closePercent = baseStats.open > 0 ? (closeChange / baseStats.open) * 100 : 0;
+
+    const offHoursChange = currentPrice - closePrice;
+    const offHoursPercent = closePrice > 0 ? (offHoursChange / closePrice) * 100 : 0;
+
     const change = currentPrice - startPrice;
     const percent = startPrice > 0 ? (change / startPrice) * 100 : 0;
     return {
@@ -651,6 +658,13 @@ export default function App() {
       percent,
       label: granObj.periodLabel,
       isPositive: change >= 0,
+      closePrice,
+      closeChange,
+      closePercent,
+      isClosePositive: closeChange >= 0,
+      offHoursChange,
+      offHoursPercent,
+      isOffHoursPositive: offHoursChange >= 0,
     };
   };
 
@@ -1091,8 +1105,15 @@ export default function App() {
   useEffect(() => {
     if (chartContainerRef.current) {
       try {
-        const formatTimeET = (timeSec: number) => {
+        const formatTickMark = (timeSec: number) => {
           const date = new Date(timeSec * 1000);
+          if (selectedGranularity === '1d' || selectedGranularity === '1w') {
+            return date.toLocaleDateString("en-US", {
+              timeZone: "America/New_York",
+              month: "numeric",
+              day: "numeric",
+            });
+          }
           return date.toLocaleTimeString("en-US", {
             timeZone: "America/New_York",
             hour: "2-digit",
@@ -1101,8 +1122,17 @@ export default function App() {
           });
         };
 
-        const formatDateET = (timeSec: number) => {
-          const date = new Date(timeSec * 1000);
+        const formatTooltipTime = (timeSec: any) => {
+          const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
+          const date = new Date(ts * 1000);
+          if (selectedGranularity === '1d' || selectedGranularity === '1w') {
+            return date.toLocaleDateString("en-US", {
+              timeZone: "America/New_York",
+              month: "numeric",
+              day: "numeric",
+              year: "numeric",
+            });
+          }
           const dStr = date.toLocaleDateString("en-US", {
             timeZone: "America/New_York",
             month: "numeric",
@@ -1119,6 +1149,7 @@ export default function App() {
           return `${dStr}, ${tStr}`;
         };
 
+        const isDailyInitial = selectedGranularity === '1d' || selectedGranularity === '1w';
         const chart = createChart(chartContainerRef.current, {
           width: chartContainerRef.current.clientWidth,
           height: 380,
@@ -1131,19 +1162,16 @@ export default function App() {
             horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
           },
           timeScale: {
-            timeVisible: true,
+            timeVisible: !isDailyInitial,
             secondsVisible: false,
             borderColor: 'rgba(255, 255, 255, 0.1)',
             rightOffset: 0,
             fixLeftEdge: true,
             fixRightEdge: true,
-            tickMarkFormatter: (timeSec: number) => formatTimeET(timeSec),
+            tickMarkFormatter: (timeSec: number) => formatTickMark(timeSec),
           },
           localization: {
-            timeFormatter: (timeSec: any) => {
-              const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
-              return formatDateET(ts);
-            },
+            timeFormatter: (timeSec: any) => formatTooltipTime(timeSec),
           }
         });
 
@@ -1198,6 +1226,62 @@ export default function App() {
   // Flag viewport fitting whenever ticker, granularity, bar interval, or chart type changes
   useEffect(() => {
     shouldFitContentRef.current = true;
+    if (chartRef.current) {
+      const isDailyOrHigher = selectedGranularity === '1d' || selectedGranularity === '1w';
+      try {
+        chartRef.current.applyOptions({
+          timeScale: {
+            timeVisible: !isDailyOrHigher,
+            tickMarkFormatter: (timeSec: number) => {
+              const date = new Date(timeSec * 1000);
+              if (isDailyOrHigher) {
+                return date.toLocaleDateString("en-US", {
+                  timeZone: "America/New_York",
+                  month: "numeric",
+                  day: "numeric",
+                });
+              }
+              return date.toLocaleTimeString("en-US", {
+                timeZone: "America/New_York",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              });
+            },
+          },
+          localization: {
+            timeFormatter: (timeSec: any) => {
+              const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
+              const date = new Date(ts * 1000);
+              if (isDailyOrHigher) {
+                return date.toLocaleDateString("en-US", {
+                  timeZone: "America/New_York",
+                  month: "numeric",
+                  day: "numeric",
+                  year: "numeric",
+                });
+              }
+              const dStr = date.toLocaleDateString("en-US", {
+                timeZone: "America/New_York",
+                month: "numeric",
+                day: "numeric",
+                year: "numeric",
+              });
+              const tStr = date.toLocaleTimeString("en-US", {
+                timeZone: "America/New_York",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              });
+              return `${dStr}, ${tStr}`;
+            },
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
   }, [selectedTicker, selectedGranularity, selectedInterval, chartType]);
 
   // Update active series tick/candle data & execution markers
@@ -1568,24 +1652,83 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Big Price Display */}
-                  <div style={{ fontSize: '38px', fontWeight: 700, color: '#ffffff', marginTop: '4px', letterSpacing: '-0.8px' }}>
-                    ${periodInfo.currentPrice > 0 ? periodInfo.currentPrice.toFixed(2) : currentStockStats.open.toFixed(2)}
-                  </div>
+                  {/* Yahoo Finance Style Dual-Price Header (Regular Close vs Off-Hours Live Price) */}
+                  {marketInfo.isClosed ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '32px', marginTop: '6px', flexWrap: 'wrap' }} data-testid="dual-price-header">
+                      {/* Card 1: Regular Market Close */}
+                      <div>
+                        <div style={{ fontSize: '32px', fontWeight: 700, color: '#ffffff', letterSpacing: '-0.8px' }}>
+                          ${periodInfo.closePrice.toFixed(2)}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                          <span style={{
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            color: periodInfo.isClosePositive ? '#30d158' : '#ff453a'
+                          }}>
+                            {periodInfo.isClosePositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.closeChange).toFixed(2)} ({periodInfo.isClosePositive ? '+' : ''}{periodInfo.closePercent.toFixed(2)}%)
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>
+                            At close: 4:00 PM EDT
+                          </span>
+                        </div>
+                      </div>
 
-                  {/* Change & Percentage Indicator */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-                    <span style={{
-                      fontSize: '15px',
-                      fontWeight: 600,
-                      color: periodInfo.isPositive ? '#30d158' : '#ff453a'
-                    }}>
-                      {periodInfo.isPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.change).toFixed(2)} ({periodInfo.isPositive ? '+' : ''}{periodInfo.percent.toFixed(2)}%)
-                    </span>
-                    <span style={{ fontSize: '13px', color: '#8e8e93', fontWeight: 500 }}>
-                      {periodInfo.label}
-                    </span>
-                  </div>
+                      {/* Card 2: Off-Hours / Night Live Price */}
+                      <div style={{
+                        paddingLeft: '24px',
+                        borderLeft: '1px solid rgba(255, 255, 255, 0.12)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '28px', fontWeight: 700, color: '#f5f5f7', letterSpacing: '-0.6px' }}>
+                            ${periodInfo.currentPrice.toFixed(2)}
+                          </span>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            backgroundColor: marketInfo.badgeBg,
+                            color: marketInfo.badgeColor,
+                            border: `1px solid ${marketInfo.badgeBorder}`,
+                          }}>
+                            {marketInfo.sessionType === 'NIGHT' ? '🌙 Overnight' : '🌆 After Hours'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                          <span style={{
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            color: periodInfo.isOffHoursPositive ? '#30d158' : '#ff453a'
+                          }}>
+                            {periodInfo.isOffHoursPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.offHoursChange).toFixed(2)} ({periodInfo.isOffHoursPositive ? '+' : ''}{periodInfo.offHoursPercent.toFixed(2)}%)
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>
+                            Overnight: {new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: '2-digit', minute: '2-digit', second: '2-digit' })} EDT
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Standard Single Big Price Display for Regular Market Hours */
+                    <div>
+                      <div style={{ fontSize: '38px', fontWeight: 700, color: '#ffffff', marginTop: '4px', letterSpacing: '-0.8px' }}>
+                        ${periodInfo.currentPrice > 0 ? periodInfo.currentPrice.toFixed(2) : currentStockStats.open.toFixed(2)}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                        <span style={{
+                          fontSize: '15px',
+                          fontWeight: 600,
+                          color: periodInfo.isPositive ? '#30d158' : '#ff453a'
+                        }}>
+                          {periodInfo.isPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.change).toFixed(2)} ({periodInfo.isPositive ? '+' : ''}{periodInfo.percent.toFixed(2)}%)
+                        </span>
+                        <span style={{ fontSize: '13px', color: '#8e8e93', fontWeight: 500 }}>
+                          {periodInfo.label}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {dataSourceInfo.isMock && (
                     <div style={{
                       backgroundColor: 'rgba(255, 159, 10, 0.1)',

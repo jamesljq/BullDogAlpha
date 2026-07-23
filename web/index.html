@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bulldog Alpha Console</title>
+    <style>
+      /* 100% remove TradingView watermark logo and hyperlink from Lightweight Charts */
+      .tv-lightweight-charts a,
+      [class*="tv-lightweight-charts"] a,
+      a[href*="tradingview"],
+      div[class*="lightweight-charts"] a {
+        display: none !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+      }
+    </style>
   </head>
   <body style="margin: 0; background-color: #0b0f19;">
     <div id="root"></div>
