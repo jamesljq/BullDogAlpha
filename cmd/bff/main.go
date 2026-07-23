@@ -1192,7 +1192,7 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		var activeFeedUsed string = "IEX Feed (Free 2% Vol)"
 
 		fetchAlpacaBars := func(feedParam string) ([]ClientBar, int, error) {
-			url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=%s&start=%s&end=%s&sort=desc&limit=1000",
+			url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=%s&start=%s&end=%s&extended=true&sort=desc&limit=1000",
 				ticker, timeframe, feedParam, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
 
 			req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)

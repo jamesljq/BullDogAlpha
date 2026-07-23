@@ -592,10 +592,16 @@ export default function App() {
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
+  const activeSeriesRef = useRef<any>(null);
   const [activeSeries, setActiveSeries] = useState<any>(null);
   const seriesMarkersRef = useRef<any>(null);
   const loadedKeyRef = useRef<string>("");
   const shouldFitContentRef = useRef<boolean>(true);
+
+  const updateActiveSeries = (series: any) => {
+    activeSeriesRef.current = series;
+    setActiveSeries(series);
+  };
 
   const resyncData = async () => {
     fetchMdgConfig();
@@ -898,6 +904,25 @@ export default function App() {
               newCandles = newCandles.slice(-500);
             }
             
+            if (activeSeriesRef.current && t.sym === selectedTicker) {
+              try {
+                const lastCandle = currentCandles[currentCandles.length - 1];
+                let open = t.p, high = t.p, low = t.p;
+                if (lastCandle && Math.floor(lastCandle.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
+                  open = lastCandle.open;
+                  high = Math.max(lastCandle.high, t.p);
+                  low = Math.min(lastCandle.low, t.p);
+                }
+                if (chartType === "line") {
+                  activeSeriesRef.current.update({ time: tickTime, value: t.p });
+                } else {
+                  activeSeriesRef.current.update({ time: tickTime, open, high, low, close: t.p });
+                }
+              } catch (e) {
+                // ignore
+              }
+            }
+
             return {
               ...prev,
               [key]: newCandles
@@ -1258,7 +1283,7 @@ export default function App() {
         }
 
         chartRef.current = chart;
-        setActiveSeries(series);
+        updateActiveSeries(series);
         seriesMarkersRef.current = createSeriesMarkers(series, []);
 
         const handleResize = () => {
