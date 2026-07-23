@@ -598,18 +598,32 @@ export default function App() {
   const loadedKeyRef = useRef<string>("");
   const shouldFitContentRef = useRef<boolean>(true);
 
+  const resyncData = () => {
+    fetchMdgConfig();
+    fetchTrades();
+    if (selectedTicker) {
+      fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+    }
+    if (subscriptions.length > 0) {
+      subscriptions.forEach(sym => {
+        fetchHistoricalData(sym, "1d", "30m");
+      });
+    }
+  };
+
   // Network online/offline listener
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        connectWS();
-      }
+      addLog("Network interface reconnected (online). Re-establishing WebSocket & resyncing data...");
+      connectWS();
+      resyncData();
     };
 
     const handleOffline = () => {
       setIsOnline(false);
       setIsWsConnected(false);
+      addLog("Network interface disconnected (offline). Live market feeds paused.");
     };
 
     window.addEventListener('online', handleOnline);
@@ -619,7 +633,7 @@ export default function App() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [selectedTicker, selectedGranularity, selectedInterval, subscriptions]);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -807,6 +821,9 @@ export default function App() {
       addLog("WebSocket link established successfully with BFF.");
       setIsReconnecting(false);
       setIsWsConnected(true);
+      resyncData();
+      setOrderToast("🟢 NETWORK RESTORED: Connected to live market data feed");
+      setTimeout(() => setOrderToast(null), 3500);
     };
 
     ws.onmessage = (event) => {
