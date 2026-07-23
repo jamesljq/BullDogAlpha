@@ -445,21 +445,36 @@ describe('Bulldog Alpha Web Console', () => {
     fireEvent.click(panicBtn);
   });
 
-  test('Tab switching persistence: Trading Terminal <-> Admin Tab', async () => {
+  test('Tab switching persistence: Trading Terminal <-> Admin Tab preserves chart DOM node and viewport', async () => {
+    let container: HTMLElement;
     await act(async () => {
-      render(<App />);
+      const res = render(<App />);
+      container = res.container;
     });
 
     const adminBtn = screen.getByText(/Ingestion & Systems Admin/i);
     const terminalBtn = screen.getByText(/Trading Terminal/i);
 
+    // Initial state: Terminal is visible, Admin is hidden
+    const terminalPanel = screen.getByTestId('terminal-tab-panel');
+    const adminPanel = screen.getByTestId('admin-tab-panel');
+    expect(terminalPanel.style.display).toBe('grid');
+    expect(adminPanel.style.display).toBe('none');
+
     // Switch to Admin tab
     fireEvent.click(adminBtn);
+
+    // Assert that Terminal container remains mounted in DOM with display: none
+    expect(terminalPanel.style.display).toBe('none');
+    expect(adminPanel.style.display).toBe('block');
+    expect(screen.getByText(/Market Data Ingestion Console \(MDG\)/i)).toBeInTheDocument();
 
     // Switch back to Trading Terminal tab
     fireEvent.click(terminalBtn);
 
-    // Assert that stock header and terminal element remain rendered
+    // Assert that Terminal container becomes visible again without DOM re-mount
+    expect(terminalPanel.style.display).toBe('grid');
+    expect(adminPanel.style.display).toBe('none');
     expect(screen.getByText(/Trading Terminal/i)).toBeInTheDocument();
   });
 

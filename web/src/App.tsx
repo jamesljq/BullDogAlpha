@@ -1407,8 +1407,7 @@ export default function App() {
         </button>
       </div>
 
-      {activeTab === "terminal" ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '24px', flexGrow: 1, marginBottom: '32px' }}>
+      <div data-testid="terminal-tab-panel" style={{ display: activeTab === "terminal" ? 'grid' : 'none', gridTemplateColumns: '3fr 1fr', gap: '24px', flexGrow: 1, marginBottom: '32px' }}>
           
           {/* Left Chart & Stats Area */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -1991,8 +1990,8 @@ export default function App() {
           </div>
 
         </div>
-      ) : (
-        <>
+
+      <div data-testid="admin-tab-panel" style={{ display: activeTab === "admin" ? 'block' : 'none' }}>
           {/* Section 1: Market Data Ingestion Console (MDG) */}
           <section style={{ ...styles.card, marginBottom: '32px' }}>
             <h2 style={styles.cardTitle}>Market Data Ingestion Console (MDG)</h2>
@@ -2535,8 +2534,7 @@ export default function App() {
               </button>
             </section>
           )}
-        </>
-      )}
+        </div>
 
       {/* Terminal Log Console */}
       <footer style={styles.terminal}>
