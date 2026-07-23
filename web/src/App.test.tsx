@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -747,6 +747,68 @@ describe('Bulldog Alpha Web Console', () => {
     expect(filtered1D.length).toBe(2);
     expect(filtered1D[0].time).toBe(1784727000);
     expect(filtered1D[1].time).toBe(1784750400);
+  });
+
+  test('filterTimeframeBars comprehensively filters ALL timeframe granularities (1d, 1w, 1M, 3M, ytd, 1y, 5y, all)', () => {
+    const latestSec = 1784750400; // July 23, 2026 16:00 EDT
+    const sampleBars = [
+      { time: latestSec - 600 * 86400, open: 100, high: 105, low: 95, close: 100 },  // 600 days ago
+      { time: latestSec - 400 * 86400, open: 150, high: 160, low: 140, close: 155 },  // 400 days ago
+      { time: latestSec - 200 * 86400, open: 200, high: 210, low: 190, close: 205 },  // 200 days ago (this year 2026)
+      { time: latestSec - 40 * 86400,  open: 250, high: 260, low: 240, close: 255 },  // 40 days ago
+      { time: latestSec - 20 * 86400,  open: 280, high: 290, low: 270, close: 285 },  // 20 days ago
+      { time: latestSec - 5 * 86400,   open: 300, high: 310, low: 295, close: 305 },  // 5 days ago
+      { time: latestSec - 3600,        open: 318, high: 324, low: 314, close: 319 },  // Today 15:00 EDT
+      { time: latestSec,               open: 319, high: 320, low: 318, close: 319.28 },// Today 16:00 EDT
+    ];
+
+    // 1D: Today's 2 bars ONLY
+    const res1D = filterTimeframeBars(sampleBars, '1d');
+    expect(res1D.length).toBe(2);
+    expect(res1D[0].time).toBe(latestSec - 3600);
+
+    // 1W: Past 7 days (3 bars: 5 days ago, today 15:00, today 16:00)
+    const res1W = filterTimeframeBars(sampleBars, '1w');
+    expect(res1W.length).toBe(3);
+
+    // 1M: Past 30 days (4 bars: 20 days ago, 5 days ago, 2 today)
+    const res1M = filterTimeframeBars(sampleBars, '1M');
+    expect(res1M.length).toBe(4);
+
+    // 3M: Past 90 days (5 bars: 40 days ago, 20 days ago, 5 days ago, 2 today)
+    const res3M = filterTimeframeBars(sampleBars, '3M');
+    expect(res3M.length).toBe(5);
+
+    // YTD: This year 2026 (6 bars: 200d, 40d, 20d, 5d, 2 today)
+    const resYTD = filterTimeframeBars(sampleBars, 'ytd');
+    expect(resYTD.length).toBe(6);
+
+    // 1Y: Past 365 days (6 bars)
+    const res1Y = filterTimeframeBars(sampleBars, '1y');
+    expect(res1Y.length).toBe(6);
+
+    // 5Y: Past 1825 days (all 8 bars)
+    const res5Y = filterTimeframeBars(sampleBars, '5y');
+    expect(res5Y.length).toBe(8);
+
+    // ALL: All 8 bars
+    const resALL = filterTimeframeBars(sampleBars, 'all');
+    expect(resALL.length).toBe(8);
+  });
+
+  test('Validates Line 📈 vs Candlestick 🕯️ series data formatting compatibility across filtered bars', () => {
+    const bars = [
+      { time: 1784727000, open: 321.13, high: 324.49, low: 314.91, close: 319.28 },
+    ];
+    const filtered = filterTimeframeBars(bars, '1d');
+
+    // Line series format: { time, value }
+    const lineSeries = filtered.map(b => ({ time: b.time, value: b.close }));
+    expect(lineSeries[0]).toEqual({ time: 1784727000, value: 319.28 });
+
+    // Candlestick series format: { time, open, high, low, close }
+    const candleSeries = filtered.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+    expect(candleSeries[0]).toEqual({ time: 1784727000, open: 321.13, high: 324.49, low: 314.91, close: 319.28 });
   });
 
   test('getIntervalSeconds correctly resolves timeframe interval step seconds', () => {

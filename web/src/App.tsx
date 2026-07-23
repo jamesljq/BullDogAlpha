@@ -447,6 +447,54 @@ export const getTodayStats = (candles: any[]) => {
   return { open, high, low };
 };
 
+export const filterTimeframeBars = (bars: any[], granularity: string): any[] => {
+  if (!bars || bars.length === 0) return [];
+  const validBars = bars.filter((b: any) => b && b.time && (b.close || b.value || b.high || 0) > 0);
+  if (validBars.length === 0) return [];
+
+  const getNYDateStr = (timeSec: number) => {
+    const d = new Date(timeSec * 1000);
+    return d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+  };
+
+  const latestBarTime = validBars[validBars.length - 1].time;
+  const latestDateStr = getNYDateStr(latestBarTime);
+
+  switch (granularity) {
+    case "1d": {
+      return validBars.filter((b: any) => getNYDateStr(b.time) === latestDateStr);
+    }
+    case "1w": {
+      const cutoff = latestBarTime - 7 * 86400;
+      return validBars.filter((b: any) => b.time >= cutoff);
+    }
+    case "1M": {
+      const cutoff = latestBarTime - 30 * 86400;
+      return validBars.filter((b: any) => b.time >= cutoff);
+    }
+    case "3M": {
+      const cutoff = latestBarTime - 90 * 86400;
+      return validBars.filter((b: any) => b.time >= cutoff);
+    }
+    case "ytd": {
+      const currentYear = new Date(latestBarTime * 1000).getUTCFullYear();
+      return validBars.filter((b: any) => new Date(b.time * 1000).getUTCFullYear() === currentYear);
+    }
+    case "1y": {
+      const cutoff = latestBarTime - 365 * 86400;
+      return validBars.filter((b: any) => b.time >= cutoff);
+    }
+    case "5y": {
+      const cutoff = latestBarTime - 1825 * 86400;
+      return validBars.filter((b: any) => b.time >= cutoff);
+    }
+    case "all":
+    default: {
+      return validBars;
+    }
+  }
+};
+
 export const getMarketSessionPrices = (candles: any[]) => {
   if (!candles || candles.length === 0) {
     return { regularOpen: 0, regularClose: 0, latestPrice: 0 };
@@ -831,20 +879,8 @@ export default function App() {
           if (data.success && data.bars) {
             const key = `${ticker}_${granularity}`;
             
-            // Fill intermediate night session granularity bars if gap exists up to current time
-            let processedBars = [...data.bars];
-
-            if (granularity === "1d" && processedBars.length > 0) {
-              const getNYDateStr = (timeSec: number) => {
-                const d = new Date(timeSec * 1000);
-                return d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-              };
-              const validBars = processedBars.filter((b: any) => b && b.time && (b.close || b.value || b.high || 0) > 0);
-              if (validBars.length > 0) {
-                const latestDateStr = getNYDateStr(validBars[validBars.length - 1].time);
-                processedBars = processedBars.filter((b: any) => getNYDateStr(b.time) === latestDateStr);
-              }
-            }
+            // Filter bars according to timeframe scope (1d, 1w, 1M, 3M, ytd, 1y, 5y, all)
+            let processedBars = filterTimeframeBars(data.bars, granularity);
 
             const intervalSec = getIntervalSeconds(interval);
             if (processedBars.length > 0 && (granularity === "1d" || granularity === "1w")) {
