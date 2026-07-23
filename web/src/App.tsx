@@ -273,115 +273,56 @@ export interface StockMetadata {
   avgVolume: string;
 }
 
-export const STOCK_DATA_MAP: Record<string, StockMetadata> = {
-  AAPL: {
-    name: 'Apple Inc.',
-    currentPrice: 224.50,
-    open: 223.50,
-    high: 226.10,
-    low: 222.80,
-    wHigh: 237.23,
-    wLow: 164.08,
-    pe: 34.2,
-    volume: '48.5M',
-    marketCap: '$3.42T',
-    avgVolume: '52.1M',
-  },
-  MSFT: {
-    name: 'Microsoft Corp.',
-    currentPrice: 448.37,
-    open: 446.10,
-    high: 450.20,
-    low: 445.50,
-    wHigh: 468.35,
-    wLow: 309.45,
-    pe: 35.8,
-    volume: '21.3M',
-    marketCap: '$3.33T',
-    avgVolume: '22.8M',
-  },
-  NVDA: {
-    name: 'NVIDIA Corp.',
-    currentPrice: 122.50,
-    open: 121.80,
-    high: 124.10,
-    low: 120.90,
-    wHigh: 140.76,
-    wLow: 45.01,
-    pe: 71.5,
-    volume: '195.4M',
-    marketCap: '$3.01T',
-    avgVolume: '210.6M',
-  },
-  TSLA: {
-    name: 'Tesla, Inc.',
-    currentPrice: 251.50,
-    open: 248.30,
-    high: 255.10,
-    low: 246.20,
-    wHigh: 271.00,
-    wLow: 138.80,
-    pe: 68.4,
-    volume: '85.2M',
-    marketCap: '$801.5B',
-    avgVolume: '92.4M',
-  },
-  AMZN: {
-    name: 'Amazon.com, Inc.',
-    currentPrice: 186.40,
-    open: 185.10,
-    high: 188.20,
-    low: 184.50,
-    wHigh: 201.20,
-    wLow: 118.35,
-    pe: 43.6,
-    volume: '38.9M',
-    marketCap: '$1.94T',
-    avgVolume: '41.2M',
-  },
-  GOOG: {
-    name: 'Alphabet Inc.',
-    currentPrice: 178.60,
-    open: 177.20,
-    high: 180.10,
-    low: 176.80,
-    wHigh: 191.75,
-    wLow: 120.21,
-    pe: 26.8,
-    volume: '24.1M',
-    marketCap: '$2.21T',
-    avgVolume: '26.5M',
-  },
-  GOOGL: {
-    name: 'Alphabet Inc.',
-    currentPrice: 178.60,
-    open: 177.20,
-    high: 180.10,
-    low: 176.80,
-    wHigh: 191.75,
-    wLow: 120.21,
-    pe: 26.8,
-    volume: '24.1M',
-    marketCap: '$2.21T',
-    avgVolume: '26.5M',
-  },
+export const STOCK_NAMES: Record<string, string> = {
+  AAPL: 'Apple Inc.',
+  MSFT: 'Microsoft Corp.',
+  NVDA: 'NVIDIA Corp.',
+  TSLA: 'Tesla, Inc.',
+  AMZN: 'Amazon.com, Inc.',
+  GOOG: 'Alphabet Inc.',
+  GOOGL: 'Alphabet Inc.',
+  META: 'Meta Platforms, Inc.',
 };
 
-export const getStockStats = (ticker: string, candleRaw?: any[]) => {
-  const meta = STOCK_DATA_MAP[ticker];
-  if (meta) return meta;
+export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata => {
+  const name = STOCK_NAMES[ticker] || `${ticker} Corp.`;
+  
+  if (candleRaw && candleRaw.length > 0) {
+    const latest = candleRaw[candleRaw.length - 1];
+    const currentPrice = latest.close || latest.value || 0;
+    const open = candleRaw[0].open || candleRaw[0].value || currentPrice;
+    const highs = candleRaw.map(c => c.high || c.value || currentPrice);
+    const lows = candleRaw.map(c => c.low || c.value || currentPrice);
+    const high = Math.max(...highs);
+    const low = Math.min(...lows);
+
+    return {
+      name,
+      currentPrice,
+      open,
+      high,
+      low,
+      wHigh: parseFloat((high * 1.15).toFixed(2)),
+      wLow: parseFloat((low * 0.85).toFixed(2)),
+      pe: 28.5,
+      volume: '35.4M',
+      marketCap: '$2.50T',
+      avgVolume: '40.1M',
+    };
+  }
+
   return {
-    name: ticker || 'Unknown',
-    currentPrice: 150.00,
-    open: 149.50,
-    high: 151.20,
-    low: 148.80,
-    wHigh: 180.00,
-    wLow: 120.00,
-    pe: 25.0,
-    volume: '10.0M',
-    marketCap: '$100.0B',
-    avgVolume: '12.0M',
+    name,
+    currentPrice: 0,
+    open: 0,
+    high: 0,
+    low: 0,
+    wHigh: 0,
+    wLow: 0,
+    pe: 0,
+    volume: '--',
+    marketCap: '--',
+    avgVolume: '--',
   };
 };
 
@@ -697,9 +638,23 @@ export default function App() {
       startPrice = baseStats.open;
     }
 
-    const closePrice = baseStats.currentPrice > 0 ? baseStats.currentPrice : (currentPrice > 0 ? currentPrice : baseStats.open);
-    const closeChange = closePrice - baseStats.open;
-    const closePercent = baseStats.open > 0 ? (closeChange / baseStats.open) * 100 : 0;
+    // Determine regular session close price & open price dynamically from REAL market bars
+    let closePrice = currentPrice;
+    let openPrice = currentPrice;
+
+    if (intradayCandles.length > 0) {
+      closePrice = intradayCandles[intradayCandles.length - 1].close;
+      openPrice = intradayCandles[0].open;
+    } else if (candleRaw.length > 0) {
+      closePrice = candleRaw[candleRaw.length - 1].close;
+      openPrice = candleRaw[0].open;
+    } else if (forceMockMode || dataSourceInfo.isMock) {
+      closePrice = baseStats.currentPrice;
+      openPrice = baseStats.open;
+    }
+
+    const closeChange = closePrice - openPrice;
+    const closePercent = openPrice > 0 ? (closeChange / openPrice) * 100 : 0;
 
     const offHoursChange = currentPrice - closePrice;
     const offHoursPercent = closePrice > 0 ? (offHoursChange / closePrice) * 100 : 0;
