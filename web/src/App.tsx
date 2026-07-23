@@ -353,14 +353,13 @@ export const getStockStats = (ticker: string, candleRaw?: any[], candles1Y?: any
   let wHigh = base.wHigh;
   let wLow = base.wLow;
 
-  const dataset1Y = (candles1Y && candles1Y.length > 0) ? candles1Y : (candleRaw && candleRaw.length > 0 ? candleRaw : []);
-  if (dataset1Y.length > 0) {
-    const valid1Y = dataset1Y.filter(c => (c.high || c.close || c.value || 0) > 0);
+  if (candles1Y && candles1Y.length > 0) {
+    const valid1Y = candles1Y.filter(c => (c.high || c.close || c.value || 0) > 0);
     if (valid1Y.length > 0) {
       const highs1Y = valid1Y.map(c => c.high || c.close || c.value || 0).filter(h => h > 0);
       const lows1Y = valid1Y.map(c => c.low || c.close || c.value || 0).filter(l => l > 0);
-      if (highs1Y.length > 0) wHigh = Math.max(...highs1Y);
-      if (lows1Y.length > 0) wLow = Math.min(...lows1Y);
+      if (highs1Y.length > 0) wHigh = Math.max(...highs1Y, base.wHigh);
+      if (lows1Y.length > 0) wLow = Math.min(...lows1Y, base.wLow);
     }
   }
 
@@ -1624,8 +1623,8 @@ export default function App() {
   if (candles1Y.length > 0) {
     const valid1YHighs = candles1Y.map((c: any) => c.high || c.close || c.value || 0).filter((h: number) => h > 0);
     const valid1YLows = candles1Y.map((c: any) => c.low || c.close || c.value || 0).filter((l: number) => l > 0);
-    if (valid1YHighs.length > 0) computedWHigh = Math.max(...valid1YHighs);
-    if (valid1YLows.length > 0) computedWLow = Math.min(...valid1YLows);
+    if (valid1YHighs.length > 0) computedWHigh = Math.max(...valid1YHighs, baseStats.wHigh);
+    if (valid1YLows.length > 0) computedWLow = Math.min(...valid1YLows, baseStats.wLow);
   }
 
   const wHigh = Math.max(computedWHigh, currentPrice || 0, dailyHigh || 0);

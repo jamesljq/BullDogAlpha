@@ -754,15 +754,25 @@ describe('Bulldog Alpha Web Console', () => {
     expect(zeroBarStats.wHigh).toBeGreaterThan(0);
   });
 
+  test('getStockStats 52-week High invariance when candles1Y is empty and candleRaw has 5 days of intraday bars (NEVER collapses to 5-day max 359.65)', () => {
+    const intraday5DayBars = [
+      { time: 1784318400, open: 349.25, high: 359.65, low: 345.00, close: 350.00 },
+      { time: 1784404800, open: 340.00, high: 345.00, low: 335.00, close: 338.00 },
+    ];
+    const stats = getStockStats('GOOGL', intraday5DayBars, []);
+    expect(stats.wHigh).toBe(397.89);
+    expect(stats.wLow).toBe(275.00);
+  });
+
   test('getStockStats dynamically evaluates 52-week High from 1Y daily dataset (e.g. 397.89 on May 7)', () => {
     const candles1Y = [
-      { time: 1778160000, high: 320.00, low: 280.00, close: 315.00 },
+      { time: 1778160000, high: 320.00, low: 250.00, close: 315.00 },
       { time: 1778246400, high: 397.89, low: 350.00, close: 395.00 }, // May 7 peak
       { time: 1778332800, high: 370.00, low: 330.00, close: 342.02 },
     ];
     const stats1Y = getStockStats('GOOGL', [], candles1Y);
     expect(stats1Y.wHigh).toBe(397.89);
-    expect(stats1Y.wLow).toBe(280.00);
+    expect(stats1Y.wLow).toBe(250.00);
   });
 
   test('Night session tick stream: Quantizes tick timestamps to exact interval boundaries and splits candles cleanly', () => {
