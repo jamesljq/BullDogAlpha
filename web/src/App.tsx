@@ -116,11 +116,23 @@ export interface MarketSessionInfo {
 
 export const getMarketSessionStatus = (): MarketSessionInfo => {
   try {
-    const estTimeString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
-    const estDate = new Date(estTimeString);
-    const day = estDate.getDay(); // 0 = Sunday, 6 = Saturday
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
+    });
 
-    if (day === 0 || day === 6) {
+    const parts = formatter.formatToParts(now);
+    const partMap: Record<string, string> = {};
+    for (const p of parts) {
+      partMap[p.type] = p.value;
+    }
+
+    const weekday = partMap.weekday; // 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'
+    if (weekday === "Sat" || weekday === "Sun") {
       return {
         isClosed: true,
         label: '🏖️ WEEKEND CLOSED',
@@ -131,8 +143,9 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
       };
     }
 
-    const hours = estDate.getHours();
-    const minutes = estDate.getMinutes();
+    let hours = parseInt(partMap.hour, 10);
+    if (hours === 24) hours = 0;
+    const minutes = parseInt(partMap.minute, 10);
     const mins = hours * 60 + minutes;
 
     const preMarketStart = 4 * 60;       // 4:00 AM ET
@@ -484,12 +497,12 @@ export default function App() {
             border = 'rgba(142, 142, 147, 0.35)';
             color = '#aeaeb2';
             if (!label.startsWith('🏖️')) label = `🏖️ ${label.replace('● ', '')}`;
-          } else if (data.session_type === 'PRE_MARKET') {
+          } else if (data.session_type === 'PRE_MARKET' || label.includes('PRE-MARKET')) {
             bg = 'rgba(10, 132, 255, 0.15)';
             border = 'rgba(10, 132, 255, 0.35)';
             color = '#0a84ff';
             if (!label.startsWith('🌅')) label = `🌅 ${label.replace('● ', '')}`;
-          } else if (data.session_type === 'EXTENDED') {
+          } else if (data.session_type === 'EXTENDED' || label.includes('EXTENDED')) {
             bg = 'rgba(255, 159, 10, 0.15)';
             border = 'rgba(255, 159, 10, 0.35)';
             color = '#ff9f0a';
@@ -499,7 +512,7 @@ export default function App() {
             border = 'rgba(191, 90, 242, 0.35)';
             color = '#bf5af2';
             if (!label.startsWith('🌙')) label = `🌙 ${label.replace('● ', '')}`;
-          } else if (data.session_type === 'REGULAR') {
+          } else if (data.session_type === 'REGULAR' || label.includes('REGULAR')) {
             if (!label.startsWith('🟢')) label = `🟢 ${label.replace('● ', '')}`;
           }
 

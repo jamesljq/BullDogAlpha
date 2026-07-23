@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/coder/websocket"
 	"github.com/redis/go-redis/v9"
@@ -1483,15 +1484,75 @@ func generateFallbackBars(ticker, interval string, start, end time.Time) []Clien
 	return bars
 }
 
+func getNewYorkTime(now time.Time) (weekday time.Weekday, hour int, minute int, mins int) {
+	loc, err := time.LoadLocation("America/New_York")
+	var nyTime time.Time
+	if err == nil {
+		nyTime = now.In(loc)
+	} else {
+		utc := now.UTC()
+		year := utc.Year()
+
+		marchSundays := 0
+		dstStart := time.Time{}
+		for d := 1; d <= 14; d++ {
+			t := time.Date(year, time.March, d, 7, 0, 0, 0, time.UTC)
+			if t.Weekday() == time.Sunday {
+				marchSundays++
+				if marchSundays == 2 {
+					dstStart = t
+					break
+				}
+			}
+		}
+
+		dstEnd := time.Time{}
+		for d := 1; d <= 7; d++ {
+			t := time.Date(year, time.November, d, 6, 0, 0, 0, time.UTC)
+			if t.Weekday() == time.Sunday {
+				dstEnd = t
+				break
+			}
+		}
+
+		if utc.After(dstStart) && utc.Before(dstEnd) {
+			nyTime = utc.Add(-4 * time.Hour)
+		} else {
+			nyTime = utc.Add(-5 * time.Hour)
+		}
+	}
+
+	return nyTime.Weekday(), nyTime.Hour(), nyTime.Minute(), nyTime.Hour()*60 + nyTime.Minute()
+}
+
+func determineSessionInfo(now time.Time) (isClosed bool, label string, sessionType string) {
+	weekday, _, _, mins := getNewYorkTime(now)
+
+	if weekday == time.Saturday || weekday == time.Sunday {
+		return true, "🏖️ WEEKEND CLOSED", "WEEKEND"
+	}
+
+	preMarketStart := 4 * 60       // 4:00 AM ET
+	marketOpen := 9*60 + 30        // 9:30 AM ET
+	marketClose := 16 * 60        // 4:00 PM ET
+	extendedClose := 20 * 60      // 8:00 PM ET
+
+	if mins >= marketOpen && mins < marketClose {
+		return false, "🟢 REGULAR MARKET", "REGULAR"
+	} else if mins >= preMarketStart && mins < marketOpen {
+		return true, "🌅 PRE-MARKET", "PRE_MARKET"
+	} else if mins >= marketClose && mins < extendedClose {
+		return true, "🌆 EXTENDED HOURS", "EXTENDED"
+	} else {
+		return true, "🌙 NIGHT SESSION", "NIGHT"
+	}
+}
+
 func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		loc = time.FixedZone("EST", -5*3600)
-	}
-	now := time.Now().In(loc)
+	now := time.Now()
 
 	vendor, _ := bff.redisClient.Get(r.Context(), "mdg:vendor").Result()
 	if vendor == "" {
@@ -1530,28 +1591,16 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 							})
 							return
 						} else {
+							isClosed, label, sessionType := determineSessionInfo(now)
 							isHoliday, holidayName, _ := isUSMarketHoliday(now)
-							label := "● MARKET CLOSED"
 							if isHoliday {
 								label = fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName)
-							} else if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-								label = "● WEEKEND CLOSED"
-							} else {
-								hours := now.Hour()
-								minutes := now.Minute()
-								mins := hours*60 + minutes
-								if mins >= 4*60 && mins < 9*60+30 {
-									label = "● PRE-MARKET"
-								} else if mins >= 16*60 && mins < 20*60 {
-									label = "● EXTENDED HOURS"
-								} else {
-									label = "● NIGHT SESSION"
-								}
+								sessionType = "HOLIDAY"
 							}
 							_ = json.NewEncoder(w).Encode(map[string]interface{}{
-								"is_closed":    true,
+								"is_closed":    isClosed,
 								"label":        label,
-								"session_type": "CLOSED",
+								"session_type": sessionType,
 								"source":       "alpaca_clock_api",
 							})
 							return
@@ -1576,23 +1625,16 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 			if json.NewDecoder(resp.Body).Decode(&polyResp) == nil {
 				resp.Body.Close()
 				if polyResp.Market == "closed" {
+					isClosed, label, sessionType := determineSessionInfo(now)
 					isHoliday, holidayName, _ := isUSMarketHoliday(now)
-					label := "● MARKET CLOSED"
 					if isHoliday {
 						label = fmt.Sprintf("● HOLIDAY CLOSED (%s)", holidayName)
-					} else if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-						label = "● WEEKEND CLOSED"
-					} else if polyResp.AfterHours {
-						label = "● EXTENDED HOURS"
-					} else if polyResp.EarlyHours {
-						label = "● PRE-MARKET"
-					} else {
-						label = "● NIGHT SESSION"
+						sessionType = "HOLIDAY"
 					}
 					_ = json.NewEncoder(w).Encode(map[string]interface{}{
-						"is_closed":    true,
+						"is_closed":    isClosed,
 						"label":        label,
-						"session_type": "CLOSED",
+						"session_type": sessionType,
 						"source":       "polygon_api",
 					})
 					return
@@ -1611,69 +1653,19 @@ func (bff *BFFServer) HandleMarketStatusAPI(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	isHoliday, holidayName, isEarlyClose := isUSMarketHoliday(now)
+	isClosed, label, sessionType := determineSessionInfo(now)
+	isHoliday, holidayName, _ := isUSMarketHoliday(now)
 	if isHoliday {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    true,
-			"label":        fmt.Sprintf("🎉 HOLIDAY CLOSED (%s)", holidayName),
-			"session_type": "HOLIDAY",
-			"reason":       holidayName,
-			"source":       "exchange_calendar",
-		})
-		return
+		label = fmt.Sprintf("🎉 HOLIDAY CLOSED (%s)", holidayName)
+		sessionType = "HOLIDAY"
 	}
 
-	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    true,
-			"label":        "🏖️ WEEKEND CLOSED",
-			"session_type": "WEEKEND",
-			"source":       "exchange_calendar",
-		})
-		return
-	}
-
-	hours := now.Hour()
-	minutes := now.Minute()
-	mins := hours*60 + minutes
-
-	preMarketStart := 4 * 60
-	marketOpen := 9*60 + 30
-	marketClose := 16 * 60
-	if isEarlyClose {
-		marketClose = 13 * 60
-	}
-	extendedClose := 20 * 60
-
-	if mins >= marketOpen && mins < marketClose {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    false,
-			"label":        "🟢 REGULAR MARKET",
-			"session_type": "REGULAR",
-			"source":       "exchange_calendar",
-		})
-	} else if mins >= preMarketStart && mins < marketOpen {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    true,
-			"label":        "🌅 PRE-MARKET",
-			"session_type": "PRE_MARKET",
-			"source":       "exchange_calendar",
-		})
-	} else if mins >= marketClose && mins < extendedClose {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    true,
-			"label":        "🌆 EXTENDED HOURS",
-			"session_type": "EXTENDED",
-			"source":       "exchange_calendar",
-		})
-	} else {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"is_closed":    true,
-			"label":        "🌙 NIGHT SESSION",
-			"session_type": "NIGHT",
-			"source":       "exchange_calendar",
-		})
-	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"is_closed":    isClosed,
+		"label":        label,
+		"session_type": sessionType,
+		"source":       "exchange_calendar",
+	})
 }
 
 func isUSMarketHoliday(t time.Time) (bool, string, bool) {
