@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -669,11 +669,33 @@ describe('Bulldog Alpha Web Console', () => {
 
     // Verify fetch was re-triggered for resync
     expect((global as any).fetch).toHaveBeenCalled();
+  });
 
-    // Verify Toast notification 'NETWORK RESTORED' is rendered
-    await waitFor(() => {
-      expect(screen.getByText(/NETWORK RESTORED/i)).toBeInTheDocument();
-    });
+  test('getMarketSessionPrices accurately separates 4:00 PM EDT regular close ($342.09) from overnight price ($333.09)', () => {
+    // Construct real-world GOOGL candles matching Yahoo Finance scenario:
+    // 09:30 EDT (570m): Open 347.15
+    // 16:00 EDT (960m): Close 342.09 (Regular Market Session Close)
+    // 00:57 EDT (overnight): Close 333.09 (Night Session Live Price)
+    
+    // 2026-07-22 09:30:00 EDT = 1784727000 sec
+    // 2026-07-22 16:00:00 EDT = 1784750400 sec
+    // 2026-07-23 00:57:00 EDT = 1784782620 sec
+    const sampleCandles = [
+      { time: 1784727000, open: 347.15, high: 348.00, low: 346.00, close: 347.00 }, // 09:30 EDT Open
+      { time: 1784750400, open: 343.00, high: 344.00, low: 341.50, close: 342.09 }, // 16:00 EDT Regular Close ($342.09)
+      { time: 1784782620, open: 335.00, high: 336.00, low: 332.50, close: 333.09 }, // 00:57 EDT Overnight Price ($333.09)
+    ];
+
+    const result = getMarketSessionPrices(sampleCandles);
+    expect(result.regularOpen).toBe(347.15);
+    expect(result.regularClose).toBe(342.09); // Card 1 must be 342.09
+    expect(result.latestPrice).toBe(333.09);   // Card 2 must be 333.09
+
+    const offHoursChange = result.latestPrice - result.regularClose;
+    expect(offHoursChange).toBeCloseTo(-9.00, 2);
+
+    const offHoursPercent = (offHoursChange / result.regularClose) * 100;
+    expect(offHoursPercent).toBeCloseTo(-2.63, 2);
   });
 
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {

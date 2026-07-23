@@ -326,6 +326,35 @@ export const getStockStats = (ticker: string, candleRaw?: any[]): StockMetadata 
   };
 };
 
+export const getMarketSessionPrices = (candles: any[]) => {
+  if (!candles || candles.length === 0) {
+    return { regularOpen: 0, regularClose: 0, latestPrice: 0 };
+  }
+
+  const latestPrice = candles[candles.length - 1].close || candles[candles.length - 1].value || 0;
+
+  // Filter candles that fell within US Regular Market Hours (09:30 EDT - 16:00 EDT)
+  const regularCandles = candles.filter((c: any) => {
+    if (!c.time) return false;
+    const dateStr = new Date(c.time * 1000).toLocaleString("en-US", { timeZone: "America/New_York" });
+    const dateObj = new Date(dateStr);
+    const totalMinutes = dateObj.getHours() * 60 + dateObj.getMinutes();
+    return totalMinutes >= 570 && totalMinutes <= 960; // 09:30 (570m) to 16:00 (960m)
+  });
+
+  if (regularCandles.length > 0) {
+    const regularOpen = regularCandles[0].open || regularCandles[0].value || latestPrice;
+    const regularClose = regularCandles[regularCandles.length - 1].close || regularCandles[regularCandles.length - 1].value || latestPrice;
+    return { regularOpen, regularClose, latestPrice };
+  }
+
+  return {
+    regularOpen: candles[0].open || candles[0].value || latestPrice,
+    regularClose: latestPrice,
+    latestPrice,
+  };
+};
+
 export const generateMockHistory = (ticker: string, stepSec: number = 60) => {
   const stock = getStockStats(ticker);
   const targetPrice = stock.currentPrice;
@@ -603,6 +632,8 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<"terminal" | "admin">("terminal");
 
+
+
   const getPeriodChangeInfo = () => {
     const key = `${selectedTicker}_${selectedGranularity}`;
     const rawData = tickData[key] || [];
@@ -614,19 +645,28 @@ export default function App() {
     const intradayCandles = candleData[intradayKey] || [];
     const intradayTicks = tickData[intradayKey] || [];
 
+    const targetCandles = intradayCandles.length > 0 ? intradayCandles : candleRaw;
+    const sessionPrices = getMarketSessionPrices(targetCandles);
+
     // Always anchor currentPrice to the latest live price of the stock
-    let currentPrice = 0.0;
-    if (intradayCandles.length > 0) {
-      currentPrice = intradayCandles[intradayCandles.length - 1].close;
-    } else if (intradayTicks.length > 0) {
-      currentPrice = intradayTicks[intradayTicks.length - 1].value;
-    } else if (candleRaw.length > 0) {
-      currentPrice = candleRaw[candleRaw.length - 1].close;
-    } else if (rawData.length > 0) {
-      currentPrice = rawData[rawData.length - 1].value;
-    } else if (forceMockMode || dataSourceInfo.isMock) {
-      currentPrice = baseStats.currentPrice;
+    let currentPrice = sessionPrices.latestPrice > 0 ? sessionPrices.latestPrice : 0.0;
+    if (currentPrice === 0) {
+      if (intradayTicks.length > 0) {
+        currentPrice = intradayTicks[intradayTicks.length - 1].value;
+      } else if (rawData.length > 0) {
+        currentPrice = rawData[rawData.length - 1].value;
+      }
     }
+
+    // Determine regular session close price & open price dynamically from REAL market bars
+    let closePrice = sessionPrices.regularClose > 0 ? sessionPrices.regularClose : currentPrice;
+    let openPrice = sessionPrices.regularOpen > 0 ? sessionPrices.regularOpen : currentPrice;
+
+    const closeChange = closePrice - openPrice;
+    const closePercent = openPrice > 0 ? (closeChange / openPrice) * 100 : 0;
+
+    const offHoursChange = currentPrice - closePrice;
+    const offHoursPercent = closePrice > 0 ? (offHoursChange / closePrice) * 100 : 0;
 
     // Start price of the selected timeframe
     let startPrice = currentPrice;
@@ -634,30 +674,7 @@ export default function App() {
       startPrice = candleRaw[0].open;
     } else if (rawData.length > 0) {
       startPrice = rawData[0].value;
-    } else if (forceMockMode || dataSourceInfo.isMock) {
-      startPrice = baseStats.open;
     }
-
-    // Determine regular session close price & open price dynamically from REAL market bars
-    let closePrice = currentPrice;
-    let openPrice = currentPrice;
-
-    if (intradayCandles.length > 0) {
-      closePrice = intradayCandles[intradayCandles.length - 1].close;
-      openPrice = intradayCandles[0].open;
-    } else if (candleRaw.length > 0) {
-      closePrice = candleRaw[candleRaw.length - 1].close;
-      openPrice = candleRaw[0].open;
-    } else if (forceMockMode || dataSourceInfo.isMock) {
-      closePrice = baseStats.currentPrice;
-      openPrice = baseStats.open;
-    }
-
-    const closeChange = closePrice - openPrice;
-    const closePercent = openPrice > 0 ? (closeChange / openPrice) * 100 : 0;
-
-    const offHoursChange = currentPrice - closePrice;
-    const offHoursPercent = closePrice > 0 ? (offHoursChange / closePrice) * 100 : 0;
 
     const change = currentPrice - startPrice;
     const percent = startPrice > 0 ? (change / startPrice) * 100 : 0;
