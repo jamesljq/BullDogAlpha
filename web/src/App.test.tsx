@@ -732,6 +732,23 @@ describe('Bulldog Alpha Web Console', () => {
     expect(todayStats.low).toBe(314.91);
   });
 
+  test('1D timeframe granularity filters multi-day historical bars to ONLY display today session bars', () => {
+    const multiDayBars = [
+      { time: 1784318400, open: 349.25, high: 359.65, low: 345.00, close: 350.00 }, // 7/20/2026
+      { time: 1784404800, open: 340.00, high: 345.00, low: 335.00, close: 338.00 }, // 7/21/2026
+      { time: 1784727000, open: 321.13, high: 323.50, low: 320.00, close: 322.00 }, // 7/23/2026 09:30 AM
+      { time: 1784750400, open: 318.00, high: 319.50, low: 315.00, close: 316.50 }, // 7/23/2026 16:00 PM
+    ];
+
+    const getNYDateStr = (timeSec: number) => new Date(timeSec * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York" });
+    const latestDateStr = getNYDateStr(multiDayBars[multiDayBars.length - 1].time);
+    const filtered1D = multiDayBars.filter(b => getNYDateStr(b.time) === latestDateStr);
+
+    expect(filtered1D.length).toBe(2);
+    expect(filtered1D[0].time).toBe(1784727000);
+    expect(filtered1D[1].time).toBe(1784750400);
+  });
+
   test('getIntervalSeconds correctly resolves timeframe interval step seconds', () => {
     expect(getIntervalSeconds('10s')).toBe(10);
     expect(getIntervalSeconds('1m')).toBe(60);

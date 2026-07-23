@@ -833,6 +833,19 @@ export default function App() {
             
             // Fill intermediate night session granularity bars if gap exists up to current time
             let processedBars = [...data.bars];
+
+            if (granularity === "1d" && processedBars.length > 0) {
+              const getNYDateStr = (timeSec: number) => {
+                const d = new Date(timeSec * 1000);
+                return d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+              };
+              const validBars = processedBars.filter((b: any) => b && b.time && (b.close || b.value || b.high || 0) > 0);
+              if (validBars.length > 0) {
+                const latestDateStr = getNYDateStr(validBars[validBars.length - 1].time);
+                processedBars = processedBars.filter((b: any) => getNYDateStr(b.time) === latestDateStr);
+              }
+            }
+
             const intervalSec = getIntervalSeconds(interval);
             if (processedBars.length > 0 && (granularity === "1d" || granularity === "1w")) {
               const lastBar = processedBars[processedBars.length - 1];
