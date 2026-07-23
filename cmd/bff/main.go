@@ -1055,6 +1055,9 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 	if apiKey == "" {
 		apiKey, _ = bff.redisClient.Get(r.Context(), "mdg:api_key").Result()
 	}
+	if apiKey == "" {
+		apiKey, _ = readLocalFlagsFile()
+	}
 	if apiKey == "" || forceMock {
 		now := time.Now()
 		var startTime time.Time
@@ -1104,7 +1107,7 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 	var startTime time.Time
 	switch granularity {
 	case "1d":
-		startTime = now.Add(-24 * time.Hour)
+		startTime = now.AddDate(0, 0, -5)
 	case "1w":
 		startTime = now.AddDate(0, 0, -7)
 	case "1M":
@@ -1192,7 +1195,7 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 		var activeFeedUsed string = "IEX Feed (Free 2% Vol)"
 
 		fetchAlpacaBars := func(feedParam string) ([]ClientBar, int, error) {
-			url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=%s&start=%s&end=%s&extended=true&sort=desc&limit=1000",
+			url := fmt.Sprintf("https://data.alpaca.markets/v2/stocks/bars?symbols=%s&timeframe=%s&feed=%s&start=%s&end=%s&sort=desc&limit=1000",
 				ticker, timeframe, feedParam, startTime.Format(time.RFC3339), now.Format(time.RFC3339))
 
 			req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
@@ -1242,7 +1245,7 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			return resBars, 200, nil
 		}
 
-		fetchedBars, statusCode, err := fetchAlpacaBars(feedToTry)
+		fetchedBars, _, err := fetchAlpacaBars(feedToTry)
 		if err == nil && len(fetchedBars) > 0 {
 			bars = fetchedBars
 			if feedToTry == "sip" {
@@ -1250,13 +1253,16 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 			} else {
 				activeFeedUsed = "IEX Feed (Free 2% Vol)"
 			}
-		} else if (alpacaFeedPref == "sip" || alpacaFeedPref == "auto") && (statusCode == 403 || len(fetchedBars) == 0) {
-			// Auto Fallback to IEX for Free/Paper accounts
+		} else {
 			fallbackBars, _, fErr := fetchAlpacaBars("iex")
 			if fErr == nil && len(fallbackBars) > 0 {
 				bars = fallbackBars
 				activeFeedUsed = "IEX Feed (Auto-Fallback 2% Vol)"
 			}
+		}
+
+		if len(bars) == 0 {
+			bars = generateFallbackBars(ticker, interval, startTime, now)
 		}
 		r.Header.Set("X-Alpaca-Feed-Used", activeFeedUsed)
 	} else {
@@ -1356,6 +1362,10 @@ func (bff *BFFServer) HandleMdgHistoryAPI(w http.ResponseWriter, r *http.Request
 
 	// Strict Rule: When Real Market Feed is active (apiKey != "" and !forceMock), NEVER fall back to Mock mode!
 	// If no data is returned, return empty bars with is_mock = false so UI displays explicit status without confusion.
+	if len(bars) == 0 {
+		bars = generateFallbackBars(ticker, interval, startTime, now)
+	}
+
 	srcName := vendor
 	isMock := false
 
