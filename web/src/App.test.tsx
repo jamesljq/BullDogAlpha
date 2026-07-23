@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -696,6 +696,20 @@ describe('Bulldog Alpha Web Console', () => {
 
     const offHoursPercent = (offHoursChange / result.regularClose) * 100;
     expect(offHoursPercent).toBeCloseTo(-2.63, 2);
+  });
+
+  test('checkIsEarlyCloseDay correctly identifies US Stock Exchange Half-Days (Early Close at 1:00 PM EDT)', () => {
+    // 1. Black Friday (Nov 27, 2026 - Friday)
+    const blackFriday = new Date('2026-11-27T12:00:00-05:00');
+    expect(checkIsEarlyCloseDay(blackFriday)).toBe(true);
+
+    // 2. Christmas Eve (Dec 24, 2026 - Thursday)
+    const christmasEve = new Date('2026-12-24T12:00:00-05:00');
+    expect(checkIsEarlyCloseDay(christmasEve)).toBe(true);
+
+    // 3. Regular trading day (July 15, 2026 - Wednesday)
+    const regularDay = new Date('2026-07-15T12:00:00-04:00');
+    expect(checkIsEarlyCloseDay(regularDay)).toBe(false);
   });
 
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {

@@ -112,27 +112,48 @@ export interface MarketSessionInfo {
   badgeBorder: string;
   badgeColor: string;
   sessionType: 'REGULAR' | 'PRE_MARKET' | 'EXTENDED' | 'NIGHT' | 'WEEKEND';
+  closeTimeLabel: string;
 }
+
+export const checkIsEarlyCloseDay = (dateObj: Date = new Date()): boolean => {
+  try {
+    const dateStr = dateObj.toLocaleString("en-US", { timeZone: "America/New_York" });
+    const nyDate = new Date(dateStr);
+    const month = nyDate.getMonth() + 1; // 1-12
+    const day = nyDate.getDate();
+    const dayOfWeek = nyDate.getDay(); // 0 = Sun, 5 = Fri, 6 = Sat
+
+    // July 3rd (Day before Independence Day)
+    if (month === 7 && day === 3 && dayOfWeek >= 1 && dayOfWeek <= 5) return true;
+
+    // Dec 24th (Christmas Eve)
+    if (month === 12 && day === 24 && dayOfWeek >= 1 && dayOfWeek <= 5) return true;
+
+    // Black Friday (Day after Thanksgiving - 4th Friday of Nov)
+    if (month === 11 && dayOfWeek === 5 && day >= 23 && day <= 29) return true;
+
+    return false;
+  } catch (e) {
+    return false;
+  }
+};
 
 export const getMarketSessionStatus = (): MarketSessionInfo => {
   try {
     const now = new Date();
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      weekday: "short",
-      hour: "numeric",
-      minute: "numeric",
+    const nyFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      hour: 'numeric',
+      minute: 'numeric',
       hour12: false,
     });
-
-    const parts = formatter.formatToParts(now);
+    const parts = nyFormatter.formatToParts(now);
     const partMap: Record<string, string> = {};
-    for (const p of parts) {
-      partMap[p.type] = p.value;
-    }
+    parts.forEach(p => { partMap[p.type] = p.value; });
 
-    const weekday = partMap.weekday; // 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'
-    if (weekday === "Sat" || weekday === "Sun") {
+    const weekday = partMap.weekday;
+    if (weekday === 'Sat' || weekday === 'Sun') {
       return {
         isClosed: true,
         label: '🏖️ WEEKEND CLOSED',
@@ -140,6 +161,7 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
         badgeBorder: 'rgba(142, 142, 147, 0.35)',
         badgeColor: '#aeaeb2',
         sessionType: 'WEEKEND',
+        closeTimeLabel: '4:00 PM EDT',
       };
     }
 
@@ -148,19 +170,22 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
     const minutes = parseInt(partMap.minute, 10);
     const mins = hours * 60 + minutes;
 
+    const isEarlyClose = checkIsEarlyCloseDay(now);
     const preMarketStart = 4 * 60;       // 4:00 AM ET
     const marketOpen = 9 * 60 + 30;      // 9:30 AM ET
-    const marketClose = 16 * 60;         // 4:00 PM ET
+    const marketClose = isEarlyClose ? 13 * 60 : 16 * 60;         // 1:00 PM ET vs 4:00 PM ET
     const extendedClose = 20 * 60;       // 8:00 PM ET
+    const closeTimeLabel = isEarlyClose ? '1:00 PM EDT (Early Close)' : '4:00 PM EDT';
 
     if (mins >= marketOpen && mins < marketClose) {
       return {
         isClosed: false,
-        label: '🟢 REGULAR MARKET',
+        label: isEarlyClose ? '🟢 REGULAR MARKET (EARLY CLOSE)' : '🟢 REGULAR MARKET',
         badgeBg: 'rgba(48, 209, 88, 0.15)',
         badgeBorder: 'rgba(48, 209, 88, 0.35)',
         badgeColor: '#30d158',
         sessionType: 'REGULAR',
+        closeTimeLabel,
       };
     } else if (mins >= preMarketStart && mins < marketOpen) {
       return {
@@ -170,6 +195,7 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
         badgeBorder: 'rgba(10, 132, 255, 0.35)',
         badgeColor: '#0a84ff',
         sessionType: 'PRE_MARKET',
+        closeTimeLabel,
       };
     } else if (mins >= marketClose && mins < extendedClose) {
       return {
@@ -179,6 +205,7 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
         badgeBorder: 'rgba(255, 159, 10, 0.35)',
         badgeColor: '#ff9f0a',
         sessionType: 'EXTENDED',
+        closeTimeLabel,
       };
     } else {
       return {
@@ -188,6 +215,7 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
         badgeBorder: 'rgba(191, 90, 242, 0.35)',
         badgeColor: '#bf5af2',
         sessionType: 'NIGHT',
+        closeTimeLabel,
       };
     }
   } catch (e) {
@@ -198,6 +226,7 @@ export const getMarketSessionStatus = (): MarketSessionInfo => {
       badgeBorder: 'rgba(142, 142, 147, 0.35)',
       badgeColor: '#aeaeb2',
       sessionType: 'WEEKEND',
+      closeTimeLabel: '4:00 PM EDT',
     };
   }
 };
@@ -1752,7 +1781,7 @@ export default function App() {
                             {periodInfo.isClosePositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.closeChange).toFixed(2)} ({periodInfo.isClosePositive ? '+' : ''}{periodInfo.closePercent.toFixed(2)}%)
                           </span>
                           <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>
-                            At close: 4:00 PM EDT
+                            At close: {marketInfo.closeTimeLabel || '4:00 PM EDT'}
                           </span>
                         </div>
                       </div>
