@@ -407,6 +407,47 @@ export const getStockStats = (ticker: string, candleRaw?: any[], candles1Y?: any
   };
 };
 
+export const getTodayStats = (candles: any[]) => {
+  if (!candles || candles.length === 0) {
+    return { open: 0, high: 0, low: 0 };
+  }
+
+  const getNYDateStr = (timeSec: number) => {
+    const d = new Date(timeSec * 1000);
+    return d.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+  };
+
+  const validCandles = candles.filter(c => c && c.time && (c.close || c.value || c.high || 0) > 0);
+  if (validCandles.length === 0) {
+    return { open: 0, high: 0, low: 0 };
+  }
+
+  const latestDateStr = getNYDateStr(validCandles[validCandles.length - 1].time);
+  const todayCandles = validCandles.filter(c => getNYDateStr(c.time) === latestDateStr);
+
+  if (todayCandles.length === 0) {
+    return { open: 0, high: 0, low: 0 };
+  }
+
+  const regularCandles = todayCandles.filter(c => {
+    const dateStr = new Date(c.time * 1000).toLocaleString("en-US", { timeZone: "America/New_York" });
+    const dateObj = new Date(dateStr);
+    const totalMinutes = dateObj.getHours() * 60 + dateObj.getMinutes();
+    return totalMinutes >= 570 && totalMinutes <= 960;
+  });
+
+  const targetSet = regularCandles.length > 0 ? regularCandles : todayCandles;
+
+  const open = targetSet[0].open || targetSet[0].close || targetSet[0].value || 0;
+  const highs = targetSet.map(c => c.high || c.close || c.value || 0).filter(h => h > 0);
+  const lows = targetSet.map(c => c.low || c.close || c.value || 0).filter(l => l > 0);
+
+  const high = highs.length > 0 ? Math.max(...highs) : open;
+  const low = lows.length > 0 ? Math.min(...lows) : open;
+
+  return { open, high, low };
+};
+
 export const getMarketSessionPrices = (candles: any[]) => {
   if (!candles || candles.length === 0) {
     return { regularOpen: 0, regularClose: 0, latestPrice: 0 };
@@ -1569,15 +1610,11 @@ export default function App() {
   const pricesForStats = rawDataForStats.map(d => d.value);
   const currentRsi = calculateRSI(pricesForStats);
 
-  let openPrice = (forceMockMode || dataSourceInfo.isMock) ? baseStats.open : 0;
-  let dailyHigh = (forceMockMode || dataSourceInfo.isMock) ? baseStats.high : 0;
-  let dailyLow = (forceMockMode || dataSourceInfo.isMock) ? baseStats.low : 0;
+  const todayStats = getTodayStats(intradayCandles);
 
-  if (intradayCandles.length > 0) {
-    openPrice = intradayCandles[0].open;
-    dailyHigh = Math.max(...intradayCandles.map(b => b.high));
-    dailyLow = Math.min(...intradayCandles.map(b => b.low));
-  }
+  let openPrice = todayStats.open || ((forceMockMode || dataSourceInfo.isMock) ? baseStats.open : 0);
+  let dailyHigh = todayStats.high || ((forceMockMode || dataSourceInfo.isMock) ? baseStats.high : 0);
+  let dailyLow = todayStats.low || ((forceMockMode || dataSourceInfo.isMock) ? baseStats.low : 0);
 
   const currentPrice = periodInfo.currentPrice;
 

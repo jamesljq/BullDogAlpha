@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -710,6 +710,26 @@ describe('Bulldog Alpha Web Console', () => {
     // 3. Regular trading day (July 15, 2026 - Wednesday)
     const regularDay = new Date('2026-07-15T12:00:00-04:00');
     expect(checkIsEarlyCloseDay(regularDay)).toBe(false);
+  });
+
+  test('getTodayStats accurately isolates today regular session open price ($321.13) and daily range ($314.91 - $324.49) from multi-day bars', () => {
+    const multiDayBars = [
+      // 5 days ago bar
+      { time: 1784318400, open: 349.25, high: 359.65, low: 345.00, close: 350.00 },
+      // 4 days ago bar
+      { time: 1784404800, open: 340.00, high: 345.00, low: 335.00, close: 338.00 },
+      // Today (July 22, 2026) 09:30 AM EDT bar
+      { time: 1784727000, open: 321.13, high: 323.50, low: 320.00, close: 322.00 },
+      // Today 11:00 AM EDT bar
+      { time: 1784732400, open: 322.00, high: 324.49, low: 314.91, close: 318.00 },
+      // Today 16:00 PM EDT bar
+      { time: 1784750400, open: 318.00, high: 319.50, low: 315.00, close: 316.50 },
+    ];
+
+    const todayStats = getTodayStats(multiDayBars);
+    expect(todayStats.open).toBe(321.13);
+    expect(todayStats.high).toBe(324.49);
+    expect(todayStats.low).toBe(314.91);
   });
 
   test('getIntervalSeconds correctly resolves timeframe interval step seconds', () => {
