@@ -638,12 +638,12 @@ describe('Bulldog Alpha Web Console', () => {
       window.dispatchEvent(new Event('offline'));
     });
 
-    // Assert top-right Global Circuit shows NETWORK DISCONNECTED
-    expect(screen.getByText(/NETWORK DISCONNECTED/i)).toBeInTheDocument();
+    // Assert top-right Global Circuit shows LOCAL WI-FI DISCONNECTED
+    expect(screen.getByText(/LOCAL WI-FI DISCONNECTED/i)).toBeInTheDocument();
 
     // Assert prominent offline warning banner is displayed
     expect(screen.getByTestId('offline-banner')).toBeInTheDocument();
-    expect(screen.getByText(/INTERNET CONNECTION LOST/i)).toBeInTheDocument();
+    expect(screen.getByText(/CONNECTION LOST/i)).toBeInTheDocument();
 
     // Assert Watchlist displays OFFLINE badges
     const offlineBadges = screen.getAllByText('OFFLINE');

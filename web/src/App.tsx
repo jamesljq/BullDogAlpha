@@ -1511,7 +1511,7 @@ export default function App() {
               border: "1px solid rgba(255, 69, 58, 0.3)",
               color: "#ff453a",
             }}>
-              🔴 NETWORK DISCONNECTED
+              🔴 LOCAL WI-FI DISCONNECTED
             </span>
           ) : (!isWsConnected || isReconnecting) && !dataSourceInfo.isMock ? (
             <span className="pulse-dot-red" style={{
@@ -1520,7 +1520,7 @@ export default function App() {
               border: "1px solid rgba(255, 69, 58, 0.3)",
               color: "#ff453a",
             }}>
-              🔴 OFFLINE / RECONNECTING
+              🔴 ISP / GATEWAY UNREACHABLE
             </span>
           ) : (
             <span className="pulse-dot-green" style={{
@@ -1612,7 +1612,7 @@ export default function App() {
                         whiteSpace: 'nowrap',
                         lineHeight: 1,
                       }} title="Network connection is offline. Live market feeds are currently paused.">
-                        <span>📡 DISCONNECTED ({!isOnline ? 'NO NETWORK' : 'RECONNECTING'})</span>
+                        <span>📡 DISCONNECTED ({!isOnline ? 'WI-FI OFFLINE' : 'ISP/SERVER DOWN'})</span>
                       </span>
                     ) : dataSourceInfo.isMock ? (
                       <span style={{
@@ -1866,7 +1866,7 @@ export default function App() {
                   gap: '8px',
                   marginBottom: '16px',
                 }} data-testid="offline-banner">
-                  <span>📡 <strong>INTERNET CONNECTION LOST:</strong> {!isOnline ? 'Wi-Fi or network connection is offline.' : 'WebSocket connection to BFF server dropped.'} Live market price ticks are paused and cached prices are marked as STALE.</span>
+                  <span>📡 <strong>CONNECTION LOST:</strong> {!isOnline ? 'Local Wi-Fi or network adapter is offline.' : 'ISP or server gateway is unreachable.'} Live market price ticks are paused and cached prices are marked as STALE.</span>
                 </div>
               )}
 
