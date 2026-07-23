@@ -224,6 +224,12 @@ const GRANULARITIES: GranularityOption[] = [
   { label: 'ALL', value: 'all', seconds: 311040000, periodLabel: 'All Time' },
 ];
 
+export const checkIsDailyOrHigher = (granularity: string, interval: string): boolean => {
+  const dailyGranularities = ['1M', '3M', 'ytd', '1y', '5y', 'all'];
+  const dailyIntervals = ['1d', '1w', '1m'];
+  return dailyGranularities.includes(granularity) || dailyIntervals.includes(interval);
+};
+
 interface IntervalOption {
   value: string;
   label: string;
@@ -557,6 +563,7 @@ export default function App() {
   const [rlStrategyActive, setRlStrategyActive] = useState<boolean>(true);
   const [trendStrategyActive, setTrendStrategyActive] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
   const [devMode, setDevMode] = useState<boolean>(false);
 
   // New MDG / Market Data visualization states
@@ -772,9 +779,11 @@ export default function App() {
     ws.onopen = () => {
       addLog("WebSocket link established successfully with BFF.");
       setIsReconnecting(false);
+      setIsWsConnected(true);
     };
 
     ws.onmessage = (event) => {
+      setIsWsConnected(true);
       try {
         const data = JSON.parse(event.data);
         if (data.type === "system_status" || data.type === "system_status_broadcast") {
@@ -853,11 +862,13 @@ export default function App() {
 
     ws.onclose = () => {
       addLog("WebSocket disconnected. Retrying in 3 seconds...");
+      setIsWsConnected(false);
       setIsReconnecting(true);
       setTimeout(connectWS, 3000);
     };
 
     ws.onerror = (err) => {
+      setIsWsConnected(false);
       addLog(`WebSocket connection error: ${JSON.stringify(err)}`);
     };
   };
@@ -1107,7 +1118,8 @@ export default function App() {
       try {
         const formatTickMark = (timeSec: number) => {
           const date = new Date(timeSec * 1000);
-          if (selectedGranularity === '1d' || selectedGranularity === '1w') {
+          const isDaily = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
+          if (isDaily) {
             return date.toLocaleDateString("en-US", {
               timeZone: "America/New_York",
               month: "numeric",
@@ -1125,7 +1137,15 @@ export default function App() {
         const formatTooltipTime = (timeSec: any) => {
           const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
           const date = new Date(ts * 1000);
-          if (selectedGranularity === '1d' || selectedGranularity === '1w') {
+          const isDaily = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
+          const timeET = date.toLocaleTimeString("en-US", {
+            timeZone: "America/New_York",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+          if (isDaily || timeET === "00:00:00" || timeET === "24:00:00") {
             return date.toLocaleDateString("en-US", {
               timeZone: "America/New_York",
               month: "numeric",
@@ -1139,17 +1159,10 @@ export default function App() {
             day: "numeric",
             year: "numeric",
           });
-          const tStr = date.toLocaleTimeString("en-US", {
-            timeZone: "America/New_York",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false,
-          });
-          return `${dStr}, ${tStr}`;
+          return `${dStr}, ${timeET}`;
         };
 
-        const isDailyInitial = selectedGranularity === '1d' || selectedGranularity === '1w';
+        const isDailyInitial = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
         const chart = createChart(chartContainerRef.current, {
           width: chartContainerRef.current.clientWidth,
           height: 380,
@@ -1227,7 +1240,7 @@ export default function App() {
   useEffect(() => {
     shouldFitContentRef.current = true;
     if (chartRef.current) {
-      const isDailyOrHigher = selectedGranularity === '1d' || selectedGranularity === '1w';
+      const isDailyOrHigher = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
       try {
         chartRef.current.applyOptions({
           timeScale: {
@@ -1253,7 +1266,14 @@ export default function App() {
             timeFormatter: (timeSec: any) => {
               const ts = typeof timeSec === 'number' ? timeSec : (timeSec && timeSec.timestamp) ? timeSec.timestamp : 0;
               const date = new Date(ts * 1000);
-              if (isDailyOrHigher) {
+              const timeET = date.toLocaleTimeString("en-US", {
+                timeZone: "America/New_York",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              });
+              if (isDailyOrHigher || timeET === "00:00:00" || timeET === "24:00:00") {
                 return date.toLocaleDateString("en-US", {
                   timeZone: "America/New_York",
                   month: "numeric",
@@ -1267,14 +1287,7 @@ export default function App() {
                 day: "numeric",
                 year: "numeric",
               });
-              const tStr = date.toLocaleTimeString("en-US", {
-                timeZone: "America/New_York",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
-              return `${dStr}, ${tStr}`;
+              return `${dStr}, ${timeET}`;
             },
           }
         });
@@ -1464,14 +1477,25 @@ export default function App() {
         </div>
         <div style={styles.headerStatus}>
           <span style={styles.statusLabel}>Global Circuit:</span>
-          <span className="pulse-dot-green" style={{
-            ...styles.statusBadge,
-            backgroundColor: circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.15)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.15)" : "rgba(255, 69, 58, 0.15)",
-            border: `1px solid ${circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.3)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.3)" : "rgba(255, 69, 58, 0.3)"}`,
-            color: circuitState === "RUNNING" ? "#30d158" : circuitState === "PAUSED" ? "#ff9f0a" : "#ff453a",
-          }}>
-            {circuitState}
-          </span>
+          {(!isWsConnected || isReconnecting) && !dataSourceInfo.isMock ? (
+            <span className="pulse-dot-red" style={{
+              ...styles.statusBadge,
+              backgroundColor: "rgba(255, 69, 58, 0.15)",
+              border: "1px solid rgba(255, 69, 58, 0.3)",
+              color: "#ff453a",
+            }}>
+              🔴 OFFLINE / RECONNECTING
+            </span>
+          ) : (
+            <span className="pulse-dot-green" style={{
+              ...styles.statusBadge,
+              backgroundColor: circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.15)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.15)" : "rgba(255, 69, 58, 0.15)",
+              border: `1px solid ${circuitState === "RUNNING" ? "rgba(48, 209, 88, 0.3)" : circuitState === "PAUSED" ? "rgba(255, 159, 10, 0.3)" : "rgba(255, 69, 58, 0.3)"}`,
+              color: circuitState === "RUNNING" ? "#30d158" : circuitState === "PAUSED" ? "#ff9f0a" : "#ff453a",
+            }}>
+              {circuitState}
+            </span>
+          )}
         </div>
       </header>
 
@@ -1688,34 +1712,36 @@ export default function App() {
                         paddingLeft: '24px',
                         borderLeft: '1px solid rgba(255, 255, 255, 0.12)',
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '28px', fontWeight: 700, color: '#f5f5f7', letterSpacing: '-0.6px' }}>
-                            ${periodInfo.currentPrice.toFixed(2)}
-                          </span>
-                          <span style={{
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            padding: '3px 8px',
-                            borderRadius: '12px',
-                            backgroundColor: marketInfo.badgeBg,
-                            color: marketInfo.badgeColor,
-                            border: `1px solid ${marketInfo.badgeBorder}`,
-                          }}>
-                            {marketInfo.sessionType === 'NIGHT' ? '🌙 Overnight' : '🌆 After Hours'}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-                          <span style={{
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            color: periodInfo.isOffHoursPositive ? '#30d158' : '#ff453a'
-                          }}>
-                            {periodInfo.isOffHoursPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.offHoursChange).toFixed(2)} ({periodInfo.isOffHoursPositive ? '+' : ''}{periodInfo.offHoursPercent.toFixed(2)}%)
-                          </span>
-                          <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>
-                            Overnight: {new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: '2-digit', minute: '2-digit', second: '2-digit' })} EDT
-                          </span>
-                        </div>
+                        {periodInfo.currentPrice > 0 ? (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '28px', fontWeight: 700, color: '#f5f5f7', letterSpacing: '-0.6px' }}>
+                                ${periodInfo.currentPrice.toFixed(2)}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                              <span style={{
+                                fontSize: '14px',
+                                fontWeight: 600,
+                                color: periodInfo.isOffHoursPositive ? '#30d158' : '#ff453a'
+                              }}>
+                                {periodInfo.isOffHoursPositive ? '▲ +' : '▼ -'}${Math.abs(periodInfo.offHoursChange).toFixed(2)} ({periodInfo.isOffHoursPositive ? '+' : ''}{periodInfo.offHoursPercent.toFixed(2)}%)
+                              </span>
+                              <span style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500 }}>
+                                {marketInfo.sessionType === 'NIGHT' ? 'Overnight' : 'After-Hours'}: {new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: '2-digit', minute: '2-digit', second: '2-digit' })} EDT
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: '28px', fontWeight: 700, color: '#8e8e93', letterSpacing: '-0.6px' }}>
+                              --.--
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8e8e93', fontWeight: 500, marginTop: '2px' }}>
+                              No Off-Hours Live Feed Data
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -2097,6 +2123,7 @@ export default function App() {
                   const change = latestPrice - openPrice;
                   const changePercent = openPrice > 0 ? (change / openPrice) * 100 : 0.0;
                   const isUp = change >= 0;
+                  const isOffline = isReconnecting || (!isWsConnected && !dataSourceInfo.isMock);
                   
                   return (
                     <div
@@ -2112,16 +2139,32 @@ export default function App() {
                         border: `1px solid ${selectedTicker === sym ? 'rgba(10, 132, 255, 0.3)' : 'transparent'}`,
                         cursor: 'pointer',
                         transition: 'all 0.2s',
+                        opacity: isOffline ? 0.8 : 1,
                       }}
                     >
-                      <span style={{ fontWeight: 600, color: '#ffffff' }}>{sym}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 600, color: '#ffffff' }}>{sym}</span>
+                        {isOffline && (
+                          <span style={{
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(255, 69, 58, 0.2)',
+                            color: '#ff453a',
+                            border: '1px solid rgba(255, 69, 58, 0.3)',
+                          }}>
+                            OFFLINE
+                          </span>
+                        )}
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                          <span style={{ fontSize: '14px', fontWeight: 600 }}>
+                          <span style={{ fontSize: '14px', fontWeight: 600, color: isOffline ? '#8e8e93' : '#ffffff' }}>
                             {latestPrice > 0 ? `$${latestPrice.toFixed(2)}` : '--.--'}
                           </span>
-                          <span style={{ fontSize: '11px', color: latestPrice > 0 ? (isUp ? '#30d158' : '#ff453a') : '#8e8e93' }}>
-                            {latestPrice > 0 ? `${isUp ? '+' : ''}${changePercent.toFixed(2)}%` : 'Loading...'}
+                          <span style={{ fontSize: '11px', color: isOffline ? '#8e8e93' : (latestPrice > 0 ? (isUp ? '#30d158' : '#ff453a') : '#8e8e93') }}>
+                            {latestPrice > 0 ? `${isUp ? '+' : ''}${changePercent.toFixed(2)}%` : (isOffline ? 'Offline' : 'Loading...')}
                           </span>
                         </div>
                         <button

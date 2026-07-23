@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP, aggregateTradeMarkers, TradeMarker } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_DATA_MAP, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -595,6 +595,32 @@ describe('Bulldog Alpha Web Console', () => {
     expect(AAPL.wHigh).toBeGreaterThan(AAPL.wLow);
     expect(AAPL.pe).toBeGreaterThan(0);
     expect(AAPL.marketCap).toContain('$');
+  });
+
+  test('checkIsDailyOrHigher evaluates 1Y, 1M, 3M, YTD, 5Y, ALL and 1d/1w/1m intervals as daily or higher', () => {
+    expect(checkIsDailyOrHigher('1y', '30m')).toBe(true);
+    expect(checkIsDailyOrHigher('1M', '15m')).toBe(true);
+    expect(checkIsDailyOrHigher('3M', '1m')).toBe(true);
+    expect(checkIsDailyOrHigher('ytd', '1h')).toBe(true);
+    expect(checkIsDailyOrHigher('5y', '1d')).toBe(true);
+    expect(checkIsDailyOrHigher('all', '1w')).toBe(true);
+    expect(checkIsDailyOrHigher('1d', '1d')).toBe(true);
+    expect(checkIsDailyOrHigher('1d', '15m')).toBe(false);
+  });
+
+  test('Watchlist Item Offline State: Renders OFFLINE badge when WebSocket drops', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+    // Trigger WS disconnect
+    if (wsInstance.onclose) {
+      await act(async () => {
+        wsInstance.onclose();
+      });
+    }
+    // Verify OFFLINE badges rendered in Watchlist
+    const offlineBadges = screen.getAllByText('OFFLINE');
+    expect(offlineBadges.length).toBeGreaterThan(0);
   });
 
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
