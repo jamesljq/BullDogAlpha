@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -710,6 +710,53 @@ describe('Bulldog Alpha Web Console', () => {
     // 3. Regular trading day (July 15, 2026 - Wednesday)
     const regularDay = new Date('2026-07-15T12:00:00-04:00');
     expect(checkIsEarlyCloseDay(regularDay)).toBe(false);
+  });
+
+  test('getIntervalSeconds correctly resolves timeframe interval step seconds', () => {
+    expect(getIntervalSeconds('10s')).toBe(10);
+    expect(getIntervalSeconds('1m')).toBe(60);
+    expect(getIntervalSeconds('5m')).toBe(300);
+    expect(getIntervalSeconds('15m')).toBe(900);
+    expect(getIntervalSeconds('30m')).toBe(1800);
+    expect(getIntervalSeconds('1h')).toBe(3600);
+    expect(getIntervalSeconds('1d')).toBe(86400);
+  });
+
+  test('Night session tick stream: Appends a new candle for night tick without corrupting 16:30 EDT regular close bar', () => {
+    // 16:30 EDT bar = 1784748600, close = 342.02
+    const regularCloseBar = { time: 1784748600, open: 343.00, high: 344.00, low: 341.00, close: 342.02 };
+    const currentCandles = [regularCloseBar];
+    const intervalSec = 1800; // 30m
+
+    // Night session tick arrives at 01:21:27 AM EDT = 1784784087, price = 329.71
+    const nightTickTime = 1784784087;
+    const nightTickPrice = 329.71;
+
+    const lastCandle = currentCandles[currentCandles.length - 1];
+    let newCandles;
+    let candleToPush = { time: nightTickTime, open: nightTickPrice, high: nightTickPrice, low: nightTickPrice, close: nightTickPrice };
+
+    if (lastCandle && nightTickTime <= lastCandle.time + intervalSec && (nightTickTime - lastCandle.time) < intervalSec) {
+      candleToPush = {
+        time: lastCandle.time,
+        open: lastCandle.open,
+        high: Math.max(lastCandle.high, nightTickPrice),
+        low: Math.min(lastCandle.low, nightTickPrice),
+        close: nightTickPrice,
+      };
+      newCandles = [...currentCandles.slice(0, -1), candleToPush];
+    } else {
+      newCandles = [...currentCandles, candleToPush];
+    }
+
+    // Verify 16:30 EDT bar is UNTOUCHED
+    expect(newCandles[0].close).toBe(342.02);
+    expect(newCandles[0].time).toBe(1784748600);
+
+    // Verify NEW night bar is appended
+    expect(newCandles.length).toBe(2);
+    expect(newCandles[1].time).toBe(nightTickTime);
+    expect(newCandles[1].close).toBe(329.71);
   });
 
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {

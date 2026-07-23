@@ -259,6 +259,27 @@ export const checkIsDailyOrHigher = (granularity: string, interval: string): boo
   return dailyGranularities.includes(granularity) || dailyIntervals.includes(interval);
 };
 
+export const getIntervalSeconds = (intervalStr: string): number => {
+  switch (intervalStr) {
+    case "10s": return 10;
+    case "15s": return 15;
+    case "30s": return 30;
+    case "1m": return 60;
+    case "2m": return 120;
+    case "3m": return 180;
+    case "5m": return 300;
+    case "10m": return 600;
+    case "15m": return 900;
+    case "30m": return 1800;
+    case "1h": return 3600;
+    case "2h": return 7200;
+    case "4h": return 14400;
+    case "1d": return 86400;
+    case "1w": return 604800;
+    default: return 1800;
+  }
+};
+
 interface IntervalOption {
   value: string;
   label: string;
@@ -862,16 +883,15 @@ export default function App() {
           const t = data.tick;
           const tickTime = Math.floor(t.t / 1000);
           const key = `${t.sym}_${selectedGranularity}`;
-          const granularitySec = GRANULARITIES.find(g => g.value === selectedGranularity)?.seconds || 60;
-          
+          const intervalSec = getIntervalSeconds(selectedInterval);
+
           setTickData(prev => {
             const currentTicks = prev[key] || [];
             const lastTick = currentTicks[currentTicks.length - 1];
             
             let newTicks;
-            if (lastTick && Math.floor(lastTick.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
-              lastTick.value = t.p;
-              newTicks = [...currentTicks];
+            if (lastTick && (tickTime - lastTick.time) < intervalSec) {
+              newTicks = [...currentTicks.slice(0, -1), { time: lastTick.time, value: t.p }];
             } else {
               newTicks = [...currentTicks, { time: tickTime, value: t.p }];
             }
@@ -891,13 +911,23 @@ export default function App() {
             const lastCandle = currentCandles[currentCandles.length - 1];
             
             let newCandles;
-            if (lastCandle && Math.floor(lastCandle.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
-              lastCandle.close = t.p;
-              if (t.p > lastCandle.high) lastCandle.high = t.p;
-              if (t.p < lastCandle.low) lastCandle.low = t.p;
-              newCandles = [...currentCandles];
+            let candleToPush = { time: tickTime, open: t.p, high: t.p, low: t.p, close: t.p };
+
+            if (lastCandle && tickTime <= lastCandle.time + intervalSec && (tickTime - lastCandle.time) < intervalSec) {
+              // Same interval bar: update existing bar close, high, low
+              candleToPush = {
+                time: lastCandle.time,
+                open: lastCandle.open,
+                high: Math.max(lastCandle.high, t.p),
+                low: Math.min(lastCandle.low, t.p),
+                close: t.p,
+              };
+              newCandles = [...currentCandles.slice(0, -1), candleToPush];
+            } else if (!lastCandle || tickTime > lastCandle.time) {
+              // New interval bar (e.g. night session tick at 01:21 AM EDT after 16:30 EDT close): APPEND NEW CANDLE!
+              newCandles = [...currentCandles, candleToPush];
             } else {
-              newCandles = [...currentCandles, { time: tickTime, open: t.p, high: t.p, low: t.p, close: t.p }];
+              newCandles = currentCandles;
             }
             
             if (newCandles.length > 500) {
@@ -906,17 +936,10 @@ export default function App() {
             
             if (activeSeriesRef.current && t.sym === selectedTicker) {
               try {
-                const lastCandle = currentCandles[currentCandles.length - 1];
-                let open = t.p, high = t.p, low = t.p;
-                if (lastCandle && Math.floor(lastCandle.time / granularitySec) === Math.floor(tickTime / granularitySec)) {
-                  open = lastCandle.open;
-                  high = Math.max(lastCandle.high, t.p);
-                  low = Math.min(lastCandle.low, t.p);
-                }
                 if (chartType === "line") {
-                  activeSeriesRef.current.update({ time: tickTime, value: t.p });
+                  activeSeriesRef.current.update({ time: candleToPush.time, value: t.p });
                 } else {
-                  activeSeriesRef.current.update({ time: tickTime, open, high, low, close: t.p });
+                  activeSeriesRef.current.update(candleToPush);
                 }
               } catch (e) {
                 // ignore
