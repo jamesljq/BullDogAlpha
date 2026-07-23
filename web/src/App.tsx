@@ -564,6 +564,7 @@ export default function App() {
   const [trendStrategyActive, setTrendStrategyActive] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [devMode, setDevMode] = useState<boolean>(false);
 
   // New MDG / Market Data visualization states
@@ -596,6 +597,29 @@ export default function App() {
   const seriesMarkersRef = useRef<any>(null);
   const loadedKeyRef = useRef<string>("");
   const shouldFitContentRef = useRef<boolean>(true);
+
+  // Network online/offline listener
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        connectWS();
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setIsWsConnected(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Connect to Go BFF WebSocket
   useEffect(() => {
@@ -775,6 +799,9 @@ export default function App() {
     addLog(`Connecting to BFF Gateway at ${wsUrl}...`);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    if (ws.readyState === 1) {
+      setIsWsConnected(true);
+    }
 
     ws.onopen = () => {
       addLog("WebSocket link established successfully with BFF.");
@@ -1477,7 +1504,16 @@ export default function App() {
         </div>
         <div style={styles.headerStatus}>
           <span style={styles.statusLabel}>Global Circuit:</span>
-          {(!isWsConnected || isReconnecting) && !dataSourceInfo.isMock ? (
+          {!isOnline ? (
+            <span className="pulse-dot-red" style={{
+              ...styles.statusBadge,
+              backgroundColor: "rgba(255, 69, 58, 0.15)",
+              border: "1px solid rgba(255, 69, 58, 0.3)",
+              color: "#ff453a",
+            }}>
+              🔴 NETWORK DISCONNECTED
+            </span>
+          ) : (!isWsConnected || isReconnecting) && !dataSourceInfo.isMock ? (
             <span className="pulse-dot-red" style={{
               ...styles.statusBadge,
               backgroundColor: "rgba(255, 69, 58, 0.15)",
@@ -1561,7 +1597,24 @@ export default function App() {
                     }}>
                       {marketInfo.label}
                     </span>
-                    {dataSourceInfo.isMock ? (
+                    {!isOnline || (!isWsConnected && !dataSourceInfo.isMock) || isReconnecting ? (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(255, 69, 58, 0.15)',
+                        color: '#ff453a',
+                        border: '1px solid rgba(255, 69, 58, 0.35)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1,
+                      }} title="Network connection is offline. Live market feeds are currently paused.">
+                        <span>📡 DISCONNECTED ({!isOnline ? 'NO NETWORK' : 'RECONNECTING'})</span>
+                      </span>
+                    ) : dataSourceInfo.isMock ? (
                       <span style={{
                         fontSize: '11px',
                         fontWeight: 700,
@@ -1796,6 +1849,24 @@ export default function App() {
                       <span>⚠️ <strong>NO REAL-TIME MARKET FEED DATA:</strong> No market feed bars returned for {selectedTicker} ({selectedGranularity}). Strict No-Mock Fallback is active (mock data fallback disabled).</span>
                     </div>
                   )}
+                </div>
+              )}
+
+              {(!isOnline || (!isWsConnected && !dataSourceInfo.isMock) || isReconnecting) && (
+                <div style={{
+                  backgroundColor: 'rgba(255, 69, 58, 0.12)',
+                  border: '1px solid rgba(255, 69, 58, 0.3)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  color: '#ff453a',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '16px',
+                }} data-testid="offline-banner">
+                  <span>📡 <strong>INTERNET CONNECTION LOST:</strong> {!isOnline ? 'Wi-Fi or network connection is offline.' : 'WebSocket connection to BFF server dropped.'} Live market price ticks are paused and cached prices are marked as STALE.</span>
                 </div>
               )}
 
@@ -2123,7 +2194,7 @@ export default function App() {
                   const change = latestPrice - openPrice;
                   const changePercent = openPrice > 0 ? (change / openPrice) * 100 : 0.0;
                   const isUp = change >= 0;
-                  const isOffline = isReconnecting || (!isWsConnected && !dataSourceInfo.isMock);
+                  const isOffline = !isOnline || isReconnecting || (!isWsConnected && !dataSourceInfo.isMock);
                   
                   return (
                     <div

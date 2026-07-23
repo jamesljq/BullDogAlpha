@@ -63,7 +63,12 @@ describe('Bulldog Alpha Web Console', () => {
       readyState: 1,
     };
 
-    (global as any).WebSocket = jest.fn().mockImplementation(() => wsInstance);
+    (global as any).WebSocket = jest.fn().mockImplementation(() => {
+      setTimeout(() => {
+        if (wsInstance.onopen) wsInstance.onopen();
+      }, 0);
+      return wsInstance;
+    });
 
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -619,6 +624,28 @@ describe('Bulldog Alpha Web Console', () => {
       });
     }
     // Verify OFFLINE badges rendered in Watchlist
+    const offlineBadges = screen.getAllByText('OFFLINE');
+    expect(offlineBadges.length).toBeGreaterThan(0);
+  });
+
+  test('Browser Offline Event (Wi-Fi disconnected): Renders NETWORK DISCONNECTED badge, offline banner and OFFLINE Watchlist tags', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Simulate browser offline event (e.g. user turned off Wi-Fi in Mac menu bar)
+    await act(async () => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    // Assert top-right Global Circuit shows NETWORK DISCONNECTED
+    expect(screen.getByText(/NETWORK DISCONNECTED/i)).toBeInTheDocument();
+
+    // Assert prominent offline warning banner is displayed
+    expect(screen.getByTestId('offline-banner')).toBeInTheDocument();
+    expect(screen.getByText(/INTERNET CONNECTION LOST/i)).toBeInTheDocument();
+
+    // Assert Watchlist displays OFFLINE badges
     const offlineBadges = screen.getAllByText('OFFLINE');
     expect(offlineBadges.length).toBeGreaterThan(0);
   });
