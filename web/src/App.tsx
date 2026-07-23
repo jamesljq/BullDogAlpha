@@ -598,16 +598,25 @@ export default function App() {
   const loadedKeyRef = useRef<string>("");
   const shouldFitContentRef = useRef<boolean>(true);
 
-  const resyncData = () => {
+  const resyncData = async () => {
     fetchMdgConfig();
     fetchTrades();
+    let hasSuccess = false;
     if (selectedTicker) {
-      fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+      const ok = await fetchHistoricalData(selectedTicker, selectedGranularity, selectedInterval);
+      if (ok) hasSuccess = true;
     }
     if (subscriptions.length > 0) {
-      subscriptions.forEach(sym => {
-        fetchHistoricalData(sym, "1d", "30m");
-      });
+      for (const sym of subscriptions) {
+        const ok = await fetchHistoricalData(sym, "1d", "30m");
+        if (ok) hasSuccess = true;
+      }
+    }
+    if (hasSuccess) {
+      setOrderToast("🟢 NETWORK RESTORED: Connected to live market data feed");
+      setTimeout(() => setOrderToast(null), 3500);
+    } else {
+      addLog("Reconnection probe attempted over network interface, but market feed requests failed (No Internet Access).");
     }
   };
 
@@ -747,7 +756,7 @@ export default function App() {
             } else {
               addLog(`Loaded REAL live market bars for ${ticker} (${data.bars.length} bars) via ${sourceName.toUpperCase()}`);
             }
-            return;
+            return data.bars.length > 0;
           }
         }
       } catch (e) {
@@ -761,8 +770,9 @@ export default function App() {
       setCandleData(prev => ({ ...prev, [key]: [] }));
       setDataSourceInfo({ isMock: false, source: activeVendor });
       addLog(`No real-time market data returned for ${ticker} (${granularity}). Strict No-Mock Fallback policy active.`);
-      return;
+      return false;
     }
+    return false;
 
     // Fallback to high-fidelity mock ONLY if developer explicitly requested Mock Mode
     const key = `${ticker}_${granularity}`;
@@ -822,8 +832,6 @@ export default function App() {
       setIsReconnecting(false);
       setIsWsConnected(true);
       resyncData();
-      setOrderToast("🟢 NETWORK RESTORED: Connected to live market data feed");
-      setTimeout(() => setOrderToast(null), 3500);
     };
 
     ws.onmessage = (event) => {
