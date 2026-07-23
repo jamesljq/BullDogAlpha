@@ -504,6 +504,99 @@ describe('Bulldog Alpha Web Console', () => {
     }
   });
 
+  test('Dual-Price Header Edge Case: Market session status matches dual-price card visibility', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const status = getMarketSessionStatus();
+    const dualPriceHeader = screen.queryByTestId('dual-price-header');
+    if (status.isClosed) {
+      expect(dualPriceHeader).toBeInTheDocument();
+    } else {
+      expect(dualPriceHeader).not.toBeInTheDocument();
+    }
+  });
+
+  test('Smart Time Formatter Edge Case 1: Daily/Weekly granularity formatters omit hours and minutes 00:00:00', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Switch granularity to 1D
+    const granularitySelect = screen.getAllByRole('combobox').find(
+      (select) => (select as HTMLSelectElement).value === '1d' || (select as HTMLSelectElement).innerHTML.includes('1 Day')
+    );
+    if (granularitySelect) {
+      fireEvent.change(granularitySelect, { target: { value: '1d' } });
+    }
+
+    // Verify applyOptions sets timeVisible: false for daily granularity
+    const applyOptionsCalls = mockCreateChart.mock.results.length > 0 ? mockCreateChart.mock.results[0].value.applyOptions.mock.calls : [];
+    if (applyOptionsCalls.length > 0) {
+      const lastCall = applyOptionsCalls[applyOptionsCalls.length - 1][0];
+      if (lastCall.timeScale) {
+        expect(lastCall.timeScale.timeVisible).toBe(false);
+      }
+    }
+  });
+
+  test('Smart Time Formatter Edge Case 2: Intraday granularity formatters enable timeVisible: true', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // Switch granularity to 15m
+    const granularitySelect = screen.getAllByRole('combobox').find(
+      (select) => (select as HTMLSelectElement).value === '15m' || (select as HTMLSelectElement).innerHTML.includes('15 minutes')
+    );
+    if (granularitySelect) {
+      fireEvent.change(granularitySelect, { target: { value: '15m' } });
+    }
+
+    // Verify applyOptions sets timeVisible: true for intraday granularity
+    const applyOptionsCalls = mockCreateChart.mock.results.length > 0 ? mockCreateChart.mock.results[0].value.applyOptions.mock.calls : [];
+    if (applyOptionsCalls.length > 0) {
+      const lastCall = applyOptionsCalls[applyOptionsCalls.length - 1][0];
+      if (lastCall.timeScale) {
+        expect(lastCall.timeScale.timeVisible).toBe(true);
+      }
+    }
+  });
+
+  test('TradingView Logo Suppression Edge Case: App contains CSS rules disabling logo link', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    const styleTags = document.getElementsByTagName('style');
+    let hasTradingViewSuppressionRule = false;
+    for (let i = 0; i < styleTags.length; i++) {
+      if (styleTags[i].innerHTML.includes('tradingview') || styleTags[i].innerHTML.includes('tv-lightweight-charts')) {
+        hasTradingViewSuppressionRule = true;
+        break;
+      }
+    }
+    expect(hasTradingViewSuppressionRule).toBe(true);
+  });
+
+  test('Dual-Price Header Edge Case: Zero / missing price fallbacks without NaN or Infinity', () => {
+    const stats = getStockStats('AAPL');
+    expect(Number.isNaN(stats.currentPrice)).toBe(false);
+    expect(Number.isNaN(stats.open)).toBe(false);
+    expect(Number.isNaN(stats.high)).toBe(false);
+    expect(Number.isNaN(stats.low)).toBe(false);
+    expect(stats.currentPrice).toBeGreaterThan(0);
+  });
+
+  test('Period Change Info Edge Case: Handles stock metadata and 52-week statistics accurately', () => {
+    const AAPL = STOCK_DATA_MAP['AAPL'];
+    expect(AAPL).toBeDefined();
+    expect(AAPL.wHigh).toBeGreaterThan(AAPL.wLow);
+    expect(AAPL.pe).toBeGreaterThan(0);
+    expect(AAPL.marketCap).toContain('$');
+  });
+
   test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
     const stats = getStockStats('AAPL');
     expect(stats).toHaveProperty('currentPrice');

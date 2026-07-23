@@ -1394,6 +1394,15 @@ export default function App() {
   return (
     <div style={styles.container}>
       <style>{`
+        .tv-lightweight-charts a,
+        [class*="tv-lightweight-charts"] a,
+        a[href*="tradingview"],
+        div[class*="lightweight-charts"] a {
+          display: none !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+        }
         .service-card {
           transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
