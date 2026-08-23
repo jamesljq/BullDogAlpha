@@ -367,7 +367,7 @@ describe('Bulldog Alpha Web Console', () => {
     // Click through different timeframe buttons
     const timeframes = ['1D', '1W', '1M', '3M', '1Y', '5Y', 'ALL'];
     for (const tf of timeframes) {
-      const btn = screen.getByText(tf);
+      const btn = screen.getAllByText(tf)[0];
       fireEvent.click(btn);
       expect(screen.getAllByText('$0.00 / $0.00')[0]).toBeInTheDocument();
     }
@@ -375,9 +375,10 @@ describe('Bulldog Alpha Web Console', () => {
 
   test('Tag single emoji formatting & single space spacing check', () => {
     const session = getMarketSessionStatus();
-    expect(session.label).toMatch(/^[\p{Emoji}]\s+/u);
+    expect(session.label).toMatch(/^[\p{Emoji}\uFE0F\u200D]+\s+/u);
     expect(session.label.split(' ').length).toBeGreaterThan(1);
   });
+
 
   test('Data Source Mode explicit badges & Admin toggle controls', async () => {
     (global as any).fetch = jest.fn().mockImplementation((url: string) => {
@@ -1620,4 +1621,198 @@ describe('Bulldog Alpha Web Console', () => {
       expect(screen.getByText(/Apple Inc/i)).toBeInTheDocument();
     });
   });
+
+  describe('Backtesting Lab Suite', () => {
+    const mockBacktestResponse = {
+      initial_capital: 100000,
+      final_nav: 242500,
+      final_pnl: 142500,
+      total_return_pct: 142.5,
+      cagr_pct: 19.38,
+      annualized_volatility: 16.2,
+      downside_volatility: 10.8,
+      sharpe_ratio: 1.85,
+      sortino_ratio: 2.45,
+      calmar_ratio: 1.62,
+      max_drawdown: 11.9,
+      max_drawdown_duration_bars: 32,
+      total_trades: 128,
+      winning_trades: 87,
+      losing_trades: 41,
+      win_rate_pct: 67.97,
+      profit_factor: 2.34,
+      avg_trade_pnl: 1113.28,
+      max_consecutive_wins: 7,
+      max_consecutive_losses: 3,
+      monthly_returns_matrix: {
+        '2023': { '1': 3.5, '2': -1.2, '3': 4.1, 'annual': 18.5 },
+      },
+      equity_curve: [
+        { timestamp: 1672531199000, nav: 100000, drawdown_pct: 0 },
+        { timestamp: 1704067199000, nav: 242500, drawdown_pct: 2.5 },
+      ],
+      trades: [
+        {
+          timestamp: 1672531199000,
+          order_id: 'BT-ORD-00001',
+          symbol: 'AAPL',
+          side: 'BUY',
+          qty: 100,
+          order_price: 150.0,
+          exec_price: 150.07,
+          slippage_cost: 7.5,
+          commission: 2.5,
+          realized_pnl: 0,
+          cash_after: 85000,
+          position_after: 100,
+        },
+        {
+          timestamp: 1673531199000,
+          order_id: 'BT-ORD-00002',
+          symbol: 'AAPL',
+          side: 'SELL',
+          qty: 100,
+          order_price: 165.0,
+          exec_price: 164.92,
+          slippage_cost: 8.0,
+          commission: 2.6,
+          realized_pnl: 1485.0,
+          cash_after: 101485,
+          position_after: 0,
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+        if (url.includes('/api/backtest/run')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockBacktestResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true, tickers: ['AAPL'] }),
+        });
+      });
+    });
+
+    test('Tab Navigation switches to Backtesting Lab and renders controls & cards', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      expect(backtestTabBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      expect(screen.getByTestId('backtesting-lab')).toBeInTheDocument();
+      expect(screen.getByTestId('backtest-control-panel')).toBeInTheDocument();
+
+      // Verify KPI scorecards rendered
+      await waitFor(() => {
+        expect(screen.getByTestId('backtest-kpi-cards')).toBeInTheDocument();
+        expect(screen.getByText('+142.50%')).toBeInTheDocument();
+        expect(screen.getByText('1.85')).toBeInTheDocument();
+        expect(screen.getByText('-11.90%')).toBeInTheDocument();
+      });
+    });
+
+    test('Metric Tooltip hover reveals definition and institutional benchmarks', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('metric-tooltip-sharpe')).toBeInTheDocument();
+      });
+
+      const sharpeTooltip = screen.getByTestId('metric-tooltip-sharpe');
+      fireEvent.mouseEnter(sharpeTooltip);
+
+      expect(screen.getByTestId('tooltip-popover-sharpe')).toBeInTheDocument();
+      expect(screen.getByText(/Sharpe Ratio \(夏普比率\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Exceptional/i)).toBeInTheDocument();
+
+      fireEvent.mouseLeave(sharpeTooltip);
+
+      expect(screen.queryByTestId('tooltip-popover-sharpe')).not.toBeInTheDocument();
+    });
+
+    test('Control Panel modifies strategy, symbol basket and fast presets', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      // Select strategy
+      const strategySelect = screen.getByTestId('strategy-select');
+      fireEvent.change(strategySelect, { target: { value: 'rl_strategy' } });
+      expect(strategySelect).toHaveValue('rl_strategy');
+
+      // Toggle symbol chips
+      const nvdaChip = screen.getByTestId('symbol-chip-NVDA');
+      fireEvent.click(nvdaChip);
+
+      // Click preset
+      const presetBtn = screen.getByText('5Y Tech Growth');
+      fireEvent.click(presetBtn);
+
+      // Trigger Run Backtest
+      const runBtn = screen.getByTestId('run-backtest-btn');
+      await act(async () => {
+        fireEvent.click(runBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('backtest-kpi-cards')).toBeInTheDocument();
+      });
+    });
+
+    test('Visualizer tabs switch between Equity Curve, Heatmap, and Trade Audit Log', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('equity-curve-container')).toBeInTheDocument();
+      });
+
+      // Switch to Monthly Heatmap
+      const heatmapTab = screen.getByTestId('tab-view-heatmap');
+      await act(async () => {
+        fireEvent.click(heatmapTab);
+      });
+      expect(screen.getByTestId('monthly-heatmap-container')).toBeInTheDocument();
+      expect(screen.getByText('2023')).toBeInTheDocument();
+
+      // Switch to Trade Audit Log
+      const tradesTab = screen.getByTestId('tab-view-trades');
+      await act(async () => {
+        fireEvent.click(tradesTab);
+      });
+      expect(screen.getByTestId('trade-log-table-container')).toBeInTheDocument();
+      expect(screen.getByText('BT-ORD-00001')).toBeInTheDocument();
+      expect(screen.getByText('+$1485.00')).toBeInTheDocument();
+    });
+  });
 });
+

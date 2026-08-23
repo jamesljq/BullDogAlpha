@@ -1450,6 +1450,133 @@ func TestValidateAndResolveFeedConfig(t *testing.T) {
 	os.Unsetenv("APCA_API_SECRET_KEY")
 }
 
+func TestHandleBacktestStrategiesAPI(t *testing.T) {
+	bff := &BFFServer{}
+	req := httptest.NewRequest("GET", "/api/backtest/strategies", nil)
+	rec := httptest.NewRecorder()
+
+	bff.HandleBacktestStrategiesAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var strategies []BacktestStrategyMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &strategies); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(strategies) == 0 {
+		t.Fatalf("expected at least 1 strategy, got 0")
+	}
+
+	// Options preflight
+	optReq := httptest.NewRequest("OPTIONS", "/api/backtest/strategies", nil)
+	optRec := httptest.NewRecorder()
+	bff.HandleBacktestStrategiesAPI(optRec, optReq)
+	if optRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OPTIONS, got %d", optRec.Code)
+	}
+}
+
+func TestHandleBacktestSymbolsAPI(t *testing.T) {
+	bff := &BFFServer{}
+	req := httptest.NewRequest("GET", "/api/backtest/symbols", nil)
+	rec := httptest.NewRecorder()
+
+	bff.HandleBacktestSymbolsAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var symbols []string
+	if err := json.Unmarshal(rec.Body.Bytes(), &symbols); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(symbols) == 0 {
+		t.Fatalf("expected symbols list, got empty")
+	}
+
+	// Options preflight
+	optReq := httptest.NewRequest("OPTIONS", "/api/backtest/symbols", nil)
+	optRec := httptest.NewRecorder()
+	bff.HandleBacktestSymbolsAPI(optRec, optReq)
+	if optRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OPTIONS, got %d", optRec.Code)
+	}
+}
+
+func TestHandleBacktestRunAPI(t *testing.T) {
+	bff := &BFFServer{}
+
+	// Case 1: Options preflight
+	optReq := httptest.NewRequest("OPTIONS", "/api/backtest/run", nil)
+	optRec := httptest.NewRecorder()
+	bff.HandleBacktestRunAPI(optRec, optReq)
+	if optRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OPTIONS, got %d", optRec.Code)
+	}
+
+	// Case 2: Method not allowed (GET)
+	getReq := httptest.NewRequest("GET", "/api/backtest/run", nil)
+	getRec := httptest.NewRecorder()
+	bff.HandleBacktestRunAPI(getRec, getReq)
+	if getRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 MethodNotAllowed, got %d", getRec.Code)
+	}
+
+	// Case 3: Invalid JSON body
+	badReq := httptest.NewRequest("POST", "/api/backtest/run", strings.NewReader("invalid_json"))
+	badRec := httptest.NewRecorder()
+	bff.HandleBacktestRunAPI(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 BadRequest, got %d", badRec.Code)
+	}
+
+	// Case 4: Valid Request with default fallback params
+	payload := `{"strategy":"trend","symbols":["AAPL","MSFT"],"start_date":"2021-01-01","end_date":"2023-12-31","initial_capital":100000,"slippage_bps":5,"commission_rate":0.0001,"flat_fee":1.0}`
+	runReq := httptest.NewRequest("POST", "/api/backtest/run", strings.NewReader(payload))
+	runRec := httptest.NewRecorder()
+
+	bff.HandleBacktestRunAPI(runRec, runReq)
+	if runRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", runRec.Code, runRec.Body.String())
+	}
+
+	var resp BacktestResponse
+	if err := json.Unmarshal(runRec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode backtest response: %v", err)
+	}
+
+	if resp.InitialCapital != 100000 {
+		t.Errorf("expected initial capital 100000, got %f", resp.InitialCapital)
+	}
+	if resp.FinalNAV <= 0 {
+		t.Errorf("expected positive final NAV, got %f", resp.FinalNAV)
+	}
+	if len(resp.EquityCurve) == 0 {
+		t.Errorf("expected non-empty equity curve")
+	}
+	if len(resp.MonthlyReturnsMatrix) == 0 {
+		t.Errorf("expected non-empty monthly returns matrix")
+	}
+	if len(resp.Trades) == 0 {
+		t.Errorf("expected simulated trades to be populated")
+	}
+
+	// Case 5: Different strategy branches (mean_reversion, multi_asset_limit, rl_strategy)
+	for _, strat := range []string{"mean_reversion", "multi_asset_limit", "rl_strategy"} {
+		sPayload := fmt.Sprintf(`{"strategy":"%s","symbols":["NVDA"],"start_date":"2022-01-01","end_date":"2023-01-01"}`, strat)
+		sReq := httptest.NewRequest("POST", "/api/backtest/run", strings.NewReader(sPayload))
+		sRec := httptest.NewRecorder()
+		bff.HandleBacktestRunAPI(sRec, sReq)
+		if sRec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for strategy %s, got %d", strat, sRec.Code)
+		}
+	}
+}
+
+
 
 
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createChart, LineSeries, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
+import { BacktestingLab } from './components/backtest/BacktestingLab';
 
 // Types matching the Go BFF JSON messages
 interface HealthStatus {
@@ -952,7 +953,7 @@ export default function App() {
     }
   }, [subscriptions, selectedTicker]);
 
-  const [activeTab, setActiveTab] = useState<"terminal" | "admin">("terminal");
+  const [activeTab, setActiveTab] = useState<"terminal" | "backtest" | "admin">("terminal");
 
 
 
@@ -2049,8 +2050,26 @@ export default function App() {
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
+          data-testid="tab-terminal-btn"
         >
           📈 Trading Terminal
+        </button>
+        <button
+          onClick={() => setActiveTab("backtest")}
+          style={{
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === "backtest" ? '2px solid #0a84ff' : '2px solid transparent',
+            color: activeTab === "backtest" ? '#0a84ff' : '#aeaeb2',
+            padding: '12px 16px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+          data-testid="tab-backtest-btn"
+        >
+          🧪 Backtesting Lab
         </button>
         <button
           onClick={() => setActiveTab("admin")}
@@ -2065,6 +2084,7 @@ export default function App() {
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
+          data-testid="tab-admin-btn"
         >
           ⚙️ Ingestion & Systems Admin
         </button>
@@ -2934,6 +2954,11 @@ export default function App() {
           </div>
 
         </div>
+
+      {/* Backtesting Lab Tab Panel */}
+      <div data-testid="backtest-tab-panel" style={{ display: activeTab === "backtest" ? 'block' : 'none', marginBottom: '32px' }}>
+        <BacktestingLab />
+      </div>
 
       <div data-testid="admin-tab-panel" style={{ display: activeTab === "admin" ? 'block' : 'none' }}>
           {/* Section 1: Market Data Ingestion Console (MDG) */}
