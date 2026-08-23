@@ -631,6 +631,8 @@ func (bff *BFFServer) HandleMdgTradesAPI(w http.ResponseWriter, r *http.Request)
 		bff.HandleMdgGetTradesAPI(w, r)
 	} else if r.Method == http.MethodPost {
 		bff.HandleMdgAddTradeAPI(w, r)
+	} else if r.Method == http.MethodDelete {
+		bff.HandleMdgClearTradesAPI(w, r)
 	} else {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -647,13 +649,29 @@ func (bff *BFFServer) HandleMdgGetTradesAPI(w http.ResponseWriter, r *http.Reque
 	w.Write([]byte("[" + strings.Join(tradesJSON, ",") + "]"))
 }
 
+func (bff *BFFServer) HandleMdgClearTradesAPI(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Clear all trade execution records from Redis
+	bff.redisClient.Del(ctx, "mdg:trades")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "All trades cleared successfully"})
+}
+
+func (bff *BFFServer) PurgeSimulatedTradesOnStartup(ctx context.Context) {
+	ctx = context.Background()
+	// Purge all legacy or simulated trades on startup to guarantee a clean slate
+	bff.redisClient.Del(ctx, "mdg:trades")
+	slog.Info("[BFF] Startup purge completed: wiped all legacy and simulated trades.")
+}
+
 func (bff *BFFServer) HandleMdgAddTradeAPI(w http.ResponseWriter, r *http.Request) {
 	var trade struct {
-		Symbol    string  `json:"symbol"`
-		Price     float64 `json:"price"`
-		Qty       float64 `json:"qty"`
-		Action    string  `json:"action"` // "BUY" or "SELL"
-		Timestamp int64   `json:"timestamp"`
+		Symbol      string  `json:"symbol"`
+		Price       float64 `json:"price"`
+		Qty         float64 `json:"qty"`
+		Action      string  `json:"action"` // "BUY" or "SELL"
+		Timestamp   int64   `json:"timestamp"`
+		IsSimulated bool    `json:"is_simulated"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&trade); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -666,8 +684,12 @@ func (bff *BFFServer) HandleMdgAddTradeAPI(w http.ResponseWriter, r *http.Reques
 
 	tradeJSON, _ := json.Marshal(trade)
 	ctx := r.Context()
-	bff.redisClient.LPush(ctx, "mdg:trades", string(tradeJSON))
-	bff.redisClient.LTrim(ctx, "mdg:trades", 0, 999)
+
+	// Strict Persistence Policy: ONLY real trades (is_simulated = false) are persisted in Redis across runs!
+	if !trade.IsSimulated {
+		bff.redisClient.LPush(ctx, "mdg:trades", string(tradeJSON))
+		bff.redisClient.LTrim(ctx, "mdg:trades", 0, 999)
+	}
 
 	bff.broadcast(map[string]interface{}{
 		"type":  "trade_execution",
@@ -798,6 +820,7 @@ func runBFF(ctx context.Context, cfg Config) error {
 
 	bff := NewBFFServer(rdb, cfg.MdgAddr, cfg.RiskAddr, cfg.EmsAddr, cfg.EngineAddr)
 	bff.devMode = cfg.DevMode
+	bff.PurgeSimulatedTradesOnStartup(ctx)
 
 	// Subscribe to live market data ticks from MDG via Redis PubSub
 	go func() {

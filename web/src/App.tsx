@@ -21,21 +21,28 @@ export interface TradeMarker {
   qty?: number;
   action: "BUY" | "SELL";
   timestamp: number; // epoch ms
+  is_simulated?: boolean;
 }
 
 export interface FormattedMarker {
   time: number;
+  price: number;
   position: 'belowBar' | 'aboveBar';
   color: string;
-  shape: 'arrowUp' | 'arrowDown';
+  shape: 'circle' | 'arrowUp' | 'arrowDown';
   size: number;
   text: string;
+  fullText: string;
+  action: 'BUY' | 'SELL';
+  count: number;
+  totalQty: number;
+  avgPrice: number;
 }
 
 export const aggregateTradeMarkers = (
   trades: TradeMarker[],
   symbol: string,
-  candles?: Array<{ time: number }>
+  candles?: Array<{ time: number; low?: number; high?: number; close?: number; value?: number }>
 ): FormattedMarker[] => {
   const symbolTrades = (Array.isArray(trades) ? trades : []).filter(t => t && t.symbol === symbol);
   if (symbolTrades.length === 0) return [];
@@ -48,15 +55,23 @@ export const aggregateTradeMarkers = (
     let mappedTime = tradeSec;
 
     if (sortedCandles.length > 0) {
-      let matchedCandleTime = sortedCandles[0].time;
-      for (let i = 0; i < sortedCandles.length; i++) {
-        if (sortedCandles[i].time <= tradeSec) {
-          matchedCandleTime = sortedCandles[i].time;
-        } else {
-          break;
+      if (tradeSec >= sortedCandles[sortedCandles.length - 1].time) {
+        // Snap to latest visible bar/tick if trade timestamp is newer than visible dataset
+        mappedTime = sortedCandles[sortedCandles.length - 1].time;
+      } else if (tradeSec <= sortedCandles[0].time) {
+        // Snap to first visible bar/tick if trade timestamp is older than visible dataset
+        mappedTime = sortedCandles[0].time;
+      } else {
+        let matchedCandleTime = sortedCandles[0].time;
+        for (let i = 0; i < sortedCandles.length; i++) {
+          if (sortedCandles[i].time <= tradeSec) {
+            matchedCandleTime = sortedCandles[i].time;
+          } else {
+            break;
+          }
         }
+        mappedTime = matchedCandleTime;
       }
-      mappedTime = matchedCandleTime;
     }
 
     const key = `${mappedTime}_${t.action}`;
@@ -74,7 +89,7 @@ export const aggregateTradeMarkers = (
 
     const parts = key.split('_');
     const time = parseInt(parts[0], 10);
-    const action = parts[1];
+    const action = parts[1] as 'BUY' | 'SELL';
     const count = groupTrades.length;
 
     let totalQty = 0;
@@ -87,22 +102,113 @@ export const aggregateTradeMarkers = (
     const avgPrice = totalQty > 0 ? totalVal / totalQty : groupTrades[0].price;
     const isBuy = action === 'BUY';
 
-    const text = count === 1
+    const matchedCandle = sortedCandles.find(c => c.time === time);
+    const targetPrice = matchedCandle
+      ? (isBuy ? (matchedCandle.low ?? matchedCandle.close ?? matchedCandle.value ?? avgPrice) : (matchedCandle.high ?? matchedCandle.close ?? matchedCandle.value ?? avgPrice))
+      : avgPrice;
+
+    // Strict Single-Letter Simplicity: ALWAYS 'B' for Buy, ALWAYS 'S' for Sell
+    const text = isBuy ? 'B' : 'S';
+
+    // Full detailed text for hover tooltip: "B 100@320.90"
+    const fullText = count === 1
       ? `${isBuy ? 'B' : 'S'} ${totalQty}@${avgPrice.toFixed(2)}`
       : `${isBuy ? 'B' : 'S'} ${count}x (${totalQty}@${avgPrice.toFixed(2)})`;
 
     result.push({
       time,
+      price: targetPrice,
       position: isBuy ? 'belowBar' : 'aboveBar',
-      color: isBuy ? '#30d158' : '#ff453a',
-      shape: isBuy ? 'arrowUp' : 'arrowDown',
+      color: isBuy ? '#0a84ff' : '#ff9f0a', // Electric Azure Blue (#0a84ff) for Buy, Amber Orange (#ff9f0a) for Sell
+      shape: 'circle',
       size: count > 1 ? 1.2 : 1.0,
       text,
+      fullText,
+      action,
+      count,
+      totalQty,
+      avgPrice,
     });
   }
 
   result.sort((a, b) => a.time - b.time);
   return result;
+};
+
+// Layout and overlay geometry constants (Eliminate Magic Numbers)
+export const CHART_PRICE_SCALE_WIDTH_PX = 65; // Y-axis price scale column width on the right of chart canvas
+export const POPOVER_CARD_WIDTH_PX = 210; // Floating Detail Card popover width
+export const POPOVER_CARD_HEIGHT_PX = 135; // Floating Detail Card popover height
+
+export interface SmartPopoverStyle {
+  left: string;
+  right: string;
+  top: string;
+  bottom: string;
+  transform: string;
+  marginTop: string;
+  marginBottom: string;
+  alignHorizontal: 'left' | 'right' | 'center';
+  alignVertical: 'top' | 'bottom';
+}
+
+export const getSmartPopoverPosition = (
+  x: number,
+  y: number,
+  containerWidth: number,
+  containerHeight: number,
+  isBuy: boolean
+): SmartPopoverStyle => {
+  const cardWidth = POPOVER_CARD_WIDTH_PX;
+  const cardHeight = POPOVER_CARD_HEIGHT_PX;
+
+  let left = '50%';
+  let right = 'auto';
+  let transformX = '-50%';
+  let alignHorizontal: 'left' | 'right' | 'center' = 'center';
+
+  if (x > containerWidth - cardWidth / 2 - 30) {
+    // Near right edge: align right edge of card with tag
+    left = 'auto';
+    right = '0px';
+    transformX = '0%';
+    alignHorizontal = 'right';
+  } else if (x < cardWidth / 2 + 30) {
+    // Near left edge: align left edge of card with tag
+    left = '0px';
+    right = 'auto';
+    transformX = '0%';
+    alignHorizontal = 'left';
+  }
+
+  let isAbove = !isBuy;
+
+  if (y > containerHeight - cardHeight - 30) {
+    isAbove = true; // Force popover ABOVE tag if near bottom edge
+  } else if (y < cardHeight + 30) {
+    isAbove = false; // Force popover BELOW tag if near top edge
+  }
+
+  return {
+    left,
+    right,
+    top: isAbove ? 'auto' : '100%',
+    bottom: isAbove ? '100%' : 'auto',
+    transform: `translateX(${transformX})`,
+    marginTop: isAbove ? '0px' : '6px',
+    marginBottom: isAbove ? '6px' : '0px',
+    alignHorizontal,
+    alignVertical: isAbove ? 'top' : 'bottom',
+  };
+};
+
+export const filterVisibleShieldMarkers = <T extends { x: number; y: number }>(
+  markers: T[],
+  containerWidth: number,
+  priceScaleWidth: number = CHART_PRICE_SCALE_WIDTH_PX
+): T[] => {
+  const maxAllowedX = containerWidth - priceScaleWidth;
+  return markers.filter(m => m.x >= 0 && m.x <= maxAllowedX);
 };
 
 export interface MarketSessionInfo {
@@ -342,7 +448,7 @@ export const getStockStats = (ticker: string, candleRaw?: any[], candles1Y?: any
     GOOGL: { price: 342.02, wHigh: 397.89, wLow: 275.00 },
     GOOG: { price: 342.02, wHigh: 397.89, wLow: 275.00 },
     META: { price: 622.77, wHigh: 720.00, wLow: 450.00 },
-    NVDA: { price: 212.59, wHigh: 250.00, wLow: 110.00 },
+    NVDA: { price: 196.51, wHigh: 250.00, wLow: 110.00 },
     MSFT: { price: 445.00, wHigh: 470.00, wLow: 380.00 },
     TSLA: { price: 250.00, wHigh: 310.00, wLow: 140.00 },
     AMZN: { price: 185.00, wHigh: 215.00, wLow: 155.00 },
@@ -495,19 +601,46 @@ export const filterTimeframeBars = (bars: any[], granularity: string): any[] => 
   }
 };
 
-export const getMarketSessionPrices = (candles: any[]) => {
-  if (!candles || candles.length === 0) {
+export const getMarketSessionPrices = (candles: any[], dailyCandles?: any[]) => {
+  if ((!candles || candles.length === 0) && (!dailyCandles || dailyCandles.length === 0)) {
     return { regularOpen: 0, regularClose: 0, latestPrice: 0 };
   }
 
-  const latestPrice = candles[candles.length - 1].close || candles[candles.length - 1].value || 0;
+  const latestPrice = candles && candles.length > 0 
+    ? (candles[candles.length - 1].close || candles[candles.length - 1].value || 0)
+    : (dailyCandles && dailyCandles.length > 0 ? (dailyCandles[dailyCandles.length - 1].close || 0) : 0);
 
-  // Filter candles that fell within US Regular Market Hours (09:30 EDT - 16:00 EDT)
-  const regularCandles = candles.filter((c: any) => {
+  // 1. If 1D daily candles are available, use the latest daily bar close for an INVARIANT 4:00 PM EDT收盘价
+  if (dailyCandles && dailyCandles.length > 0) {
+    const validDaily = dailyCandles.filter(c => (c.close || c.value || 0) > 0);
+    if (validDaily.length > 0) {
+      const lastDaily = validDaily[validDaily.length - 1];
+      const regularClose = lastDaily.close || lastDaily.value || 0;
+      const regularOpen = lastDaily.open || lastDaily.value || regularClose;
+      if (regularClose > 0) {
+        return { regularOpen, regularClose, latestPrice };
+      }
+    }
+  }
+
+  // 2. Fallback: Filter candles that fell within US Regular Market Hours (09:30 EDT - 16:00 EDT)
+  const regularCandles = (candles || []).filter((c: any) => {
     if (!c.time) return false;
-    const dateStr = new Date(c.time * 1000).toLocaleString("en-US", { timeZone: "America/New_York" });
-    const dateObj = new Date(dateStr);
-    const totalMinutes = dateObj.getHours() * 60 + dateObj.getMinutes();
+    const d = new Date(c.time * 1000);
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+    }).formatToParts(d);
+    
+    let h = 0;
+    let m = 0;
+    for (const p of parts) {
+      if (p.type === 'hour') h = parseInt(p.value, 10) % 24;
+      if (p.type === 'minute') m = parseInt(p.value, 10);
+    }
+    const totalMinutes = h * 60 + m;
     return totalMinutes >= 570 && totalMinutes <= 960; // 09:30 (570m) to 16:00 (960m)
   });
 
@@ -518,7 +651,7 @@ export const getMarketSessionPrices = (candles: any[]) => {
   }
 
   return {
-    regularOpen: candles[0].open || candles[0].value || latestPrice,
+    regularOpen: (candles && candles.length > 0 ? (candles[0].open || candles[0].value || latestPrice) : latestPrice),
     regularClose: latestPrice,
     latestPrice,
   };
@@ -727,6 +860,20 @@ export default function App() {
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
   const [customQty, setCustomQty] = useState<number>(100);
   const [orderToast, setOrderToast] = useState<string | null>(null);
+  const [shieldMarkers, setShieldMarkers] = useState<Array<{
+    id: string;
+    x: number;
+    y: number;
+    action: 'BUY' | 'SELL';
+    text: string;
+    fullText: string;
+    count: number;
+    qty: number;
+    price: number;
+    time: number;
+  }>>([]);
+  const [hoveredShieldId, setHoveredShieldId] = useState<string | null>(null);
+  const [pinnedShieldId, setPinnedShieldId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -820,8 +967,9 @@ export default function App() {
     const intradayCandles = candleData[intradayKey] || [];
     const intradayTicks = tickData[intradayKey] || [];
 
+    const dailyCandles = candleData[`${selectedTicker}_1y`] || candleData[`${selectedTicker}_1Y`] || [];
     const targetCandles = intradayCandles.length > 0 ? intradayCandles : candleRaw;
-    const sessionPrices = getMarketSessionPrices(targetCandles);
+    const sessionPrices = getMarketSessionPrices(targetCandles, dailyCandles);
 
     // Always anchor currentPrice to the latest live price of the stock
     let currentPrice = sessionPrices.latestPrice > 0 ? sessionPrices.latestPrice : 0.0;
@@ -1272,9 +1420,14 @@ export default function App() {
     }
   };
 
-  const clearSimulatedTrades = () => {
+  const clearSimulatedTrades = async () => {
     setTrades([]);
     addLog(`Cleared all simulated trade execution markers for ${selectedTicker || 'all symbols'}`);
+    try {
+      await fetch("/api/mdg/trades", { method: "DELETE" });
+    } catch (err) {
+      addLog(`Failed to clear simulated trades on backend: ${err}`);
+    }
   };
 
   const controlMdgStatus = async (action: "pause" | "resume") => {
@@ -1378,10 +1531,21 @@ export default function App() {
           price: currentPrice,
           qty: qtyToUse,
           action: action,
+          is_simulated: true,
         }),
       });
       if (resp.ok) {
         const data = await resp.json();
+        const createdTrade: TradeMarker = (data && data.trade) ? data.trade : {
+          symbol: selectedTicker,
+          price: currentPrice,
+          qty: qtyToUse,
+          action: action,
+          timestamp: Date.now(),
+          is_simulated: true,
+        };
+        setTrades(prev => [createdTrade, ...(Array.isArray(prev) ? prev : [])]);
+
         const msg = `Simulated execution recorded: ${action} ${qtyToUse} ${selectedTicker} @ $${currentPrice.toFixed(2)}`;
         addLog(msg);
         setOrderToast(`✓ ${action} ${qtyToUse} ${selectedTicker} @ $${currentPrice.toFixed(2)}`);
@@ -1610,19 +1774,91 @@ export default function App() {
         }
       }
 
-      if (!showTradeMarkers) {
-        if (seriesMarkersRef.current) {
-          seriesMarkersRef.current.setMarkers([]);
-        }
-      } else {
-        const currentCandles = candleData[key] || [];
-        const markers = aggregateTradeMarkers(trades, selectedTicker, currentCandles);
-        if (seriesMarkersRef.current) {
-          seriesMarkersRef.current.setMarkers(markers);
-        }
+      // Built-in markers are cleared to let Futu Small Shield Overlay tags render cleanly
+      if (seriesMarkersRef.current) {
+        seriesMarkersRef.current.setMarkers([]);
       }
     }
   }, [selectedTicker, selectedGranularity, tickData, candleData, trades, activeSeries, chartType]);
+
+  // Dynamic positioning effect for Futu Small Shield Overlay tags
+  useEffect(() => {
+    const updateShields = () => {
+      if (!chartRef.current || !activeSeries || !showTradeMarkers || !chartContainerRef.current) {
+        setShieldMarkers([]);
+        return;
+      }
+      try {
+        const timeScale = chartRef.current.timeScale();
+        const key = `${selectedTicker}_${selectedGranularity}`;
+        const rawData = chartType === 'candlestick' ? (candleData[key] || []) : (tickData[key] || []);
+        const markers = aggregateTradeMarkers(trades, selectedTicker, rawData.length > 0 ? rawData : (candleData[key] || tickData[key] || []));
+        const containerWidth = chartContainerRef.current.clientWidth || 2000;
+
+        const list: Array<{
+          id: string;
+          x: number;
+          y: number;
+          action: 'BUY' | 'SELL';
+          text: string;
+          fullText: string;
+          count: number;
+          qty: number;
+          price: number;
+          time: number;
+        }> = [];
+
+        const priceScaleWidth = CHART_PRICE_SCALE_WIDTH_PX;
+        const maxAllowedX = containerWidth - priceScaleWidth;
+
+        for (const m of markers) {
+          const x = timeScale.timeToCoordinate(m.time);
+          const y = activeSeries.priceToCoordinate(m.price);
+          if (x !== null && y !== null && x >= 0 && x <= maxAllowedX) {
+            list.push({
+              id: `${m.time}_${m.action}_${m.text}`,
+              x,
+              y,
+              action: m.action,
+              text: m.text,
+              fullText: m.fullText,
+              count: m.count,
+              qty: m.totalQty,
+              price: m.avgPrice,
+              time: m.time,
+            });
+          }
+        }
+        setShieldMarkers(list);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    updateShields();
+
+    let timeScale: any = null;
+    if (chartRef.current) {
+      try {
+        timeScale = chartRef.current.timeScale();
+        timeScale.subscribeVisibleLogicalRangeChange(updateShields);
+        timeScale.subscribeVisibleTimeRangeChange(updateShields);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    return () => {
+      if (timeScale) {
+        try {
+          timeScale.unsubscribeVisibleLogicalRangeChange(updateShields);
+          timeScale.unsubscribeVisibleTimeRangeChange(updateShields);
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, [selectedTicker, selectedGranularity, candleData, trades, activeSeries, showTradeMarkers, chartType]);
 
   const jumpChartToTrade = (timestamp: number) => {
     if (chartRef.current) {
@@ -2151,8 +2387,176 @@ export default function App() {
                 </div>
               )}
 
-              {/* Canvas Container */}
-              <div ref={chartContainerRef} style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }} />
+              {/* Canvas Container & Futu Small Shield Tag Overlay */}
+              <div
+                ref={chartContainerRef}
+                onClick={() => setPinnedShieldId(null)}
+                style={{
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '12px',
+                  overflow: (hoveredShieldId || pinnedShieldId) ? 'visible' : 'hidden',
+                  position: 'relative',
+                }}
+              >
+                {showTradeMarkers && shieldMarkers.map(sm => {
+                  const isBuy = sm.action === 'BUY';
+                  const isHovered = (hoveredShieldId === sm.id) || (pinnedShieldId === sm.id);
+
+                  return (
+                    <div
+                      key={sm.id}
+                      onMouseEnter={() => setHoveredShieldId(sm.id)}
+                      onMouseLeave={() => setHoveredShieldId(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPinnedShieldId(prev => prev === sm.id ? null : sm.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${sm.x}px`,
+                        top: isBuy ? `${sm.y + 2}px` : `${sm.y - 2}px`,
+                        // BUY tag: stem tip (▲) starts at top (0px offset), points UP into candle low
+                        // SELL tag: stem tip (▼) ends at bottom (0px offset), points DOWN into candle high
+                        transform: isBuy ? 'translate(-50%, 0%)' : 'translate(-50%, -100%)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        pointerEvents: 'auto',
+                        cursor: 'pointer',
+                        zIndex: isHovered ? 35 : 12,
+                        transition: 'transform 0.15s ease, left 0.05s ease-out, top 0.05s ease-out',
+                      }}
+                      data-testid={`futu-shield-${sm.action.toLowerCase()}`}
+                    >
+                      {/* Invisible Hover Hot-Zone Extension (does not offset triangle tip origin) */}
+                      <div style={{
+                        position: 'absolute',
+                        top: '-8px',
+                        bottom: '-8px',
+                        left: '-12px',
+                        right: '-12px',
+                        zIndex: -1,
+                      }} />
+                      {/* BUY tag stem: at top pointing UP (▲) into candle low */}
+                      {isBuy && (
+                        <div
+                          style={{
+                            width: 0,
+                            height: 0,
+                            borderLeft: '4px solid transparent',
+                            borderRight: '4px solid transparent',
+                            borderBottom: '5px solid #0a84ff',
+                            marginBottom: '-1px',
+                          }}
+                        />
+                      )}
+
+                      {/* Micro-Shield Tag Body */}
+                      <div
+                        style={{
+                          background: isBuy
+                            ? (isHovered ? 'linear-gradient(135deg, #007aff 0%, #0a84ff 100%)' : 'linear-gradient(135deg, #0a84ff 0%, #007aff 100%)')
+                            : (isHovered ? 'linear-gradient(135deg, #ff9f0a 0%, #ff9500 100%)' : 'linear-gradient(135deg, #ff9500 0%, #ff9f0a 100%)'),
+                          color: '#ffffff',
+                          fontSize: '10px',
+                          fontWeight: 800,
+                          padding: '2px 5px',
+                          borderRadius: '3px',
+                          boxShadow: isBuy
+                            ? (isHovered ? '0 4px 14px rgba(10, 132, 255, 0.75)' : '0 2px 6px rgba(10, 132, 255, 0.4)')
+                            : (isHovered ? '0 4px 14px rgba(255, 159, 10, 0.75)' : '0 2px 6px rgba(255, 159, 10, 0.4)'),
+                          letterSpacing: '0.5px',
+                          border: '1px solid rgba(255, 255, 255, 0.45)',
+                          whiteSpace: 'nowrap',
+                          lineHeight: 1,
+                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          transform: isHovered ? 'scale(1.18)' : 'scale(1)',
+                          transition: 'transform 0.15s ease, background 0.15s ease',
+                        }}
+                      >
+                        {sm.text}
+                      </div>
+
+                      {/* SELL tag stem: at bottom pointing DOWN (▼) into candle high */}
+                      {!isBuy && (
+                        <div
+                          style={{
+                            width: 0,
+                            height: 0,
+                            borderLeft: '4px solid transparent',
+                            borderRight: '4px solid transparent',
+                            borderTop: '5px solid #ff9f0a',
+                            marginTop: '-1px',
+                          }}
+                        />
+                      )}
+
+                      {/* Smart Zero-Truncation Detail Popover Card on Hover/Click */}
+                      {isHovered && (() => {
+                        const containerW = chartContainerRef.current?.clientWidth || 1000;
+                        const containerH = chartContainerRef.current?.clientHeight || 500;
+                        const smart = getSmartPopoverPosition(sm.x, sm.y, containerW, containerH, isBuy);
+
+                        return (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: smart.left,
+                              right: smart.right,
+                              top: smart.top,
+                              bottom: smart.bottom,
+                              transform: smart.transform,
+                              marginTop: smart.marginTop,
+                              marginBottom: smart.marginBottom,
+                              backgroundColor: 'rgba(18, 18, 22, 0.96)',
+                              backdropFilter: 'blur(16px)',
+                              border: `1px solid ${isBuy ? 'rgba(10, 132, 255, 0.55)' : 'rgba(255, 159, 10, 0.55)'}`,
+                              borderRadius: '10px',
+                              padding: '10px 14px',
+                              boxShadow: '0 10px 36px rgba(0, 0, 0, 0.8)',
+                              whiteSpace: 'nowrap',
+                              pointerEvents: 'none',
+                              zIndex: 40,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              minWidth: '180px',
+                            }}
+                            data-testid="futu-shield-popover-card"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '4px', marginBottom: '2px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: 800, color: isBuy ? '#0a84ff' : '#ff9f0a', letterSpacing: '0.5px' }}>
+                                {isBuy ? '🔵 BUY EXECUTION' : '🟠 SELL EXECUTION'}
+                              </span>
+                              <span style={{ fontSize: '10px', color: '#8e8e93' }}>
+                                {sm.count > 1 ? `${sm.count} Orders Merged` : 'Single Order'}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                              <span style={{ color: '#8e8e93' }}>Avg Price:</span>
+                              <span style={{ fontWeight: 700, color: '#ffffff' }}>${sm.price.toFixed(2)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                              <span style={{ color: '#8e8e93' }}>Total Qty:</span>
+                              <span style={{ fontWeight: 700, color: '#ffffff' }}>{sm.qty} shares</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                              <span style={{ color: '#8e8e93' }}>Total Value:</span>
+                              <span style={{ fontWeight: 700, color: isBuy ? '#0a84ff' : '#ff9f0a' }}>
+                                ${(sm.price * sm.qty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#8e8e93', marginTop: '2px' }}>
+                              <span>Time:</span>
+                              <span>{new Date(sm.time * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })} EDT</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Robinhood Bottom Timeframe Selector Bar */}
               <div style={{

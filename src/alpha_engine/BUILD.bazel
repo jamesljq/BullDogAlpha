@@ -68,11 +68,50 @@ py_test(
 )
 
 py_library(
+    name = "data",
+    srcs = [
+        "data/__init__.py",
+        "data/adjuster.py",
+        "data/downloader.py",
+        "data/schema.py",
+        "data/storage.py",
+        "data/validator.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        requirement("numpy"),
+        requirement("polars"),
+    ],
+)
+
+py_test(
+    name = "data_pipeline_test",
+    srcs = ["data/data_pipeline_test.py"],
+    deps = [
+        ":data",
+        requirement("numpy"),
+        requirement("polars"),
+    ],
+)
+
+py_library(
+    name = "analytics",
+    srcs = ["analytics.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        requirement("numpy"),
+    ],
+)
+
+py_library(
     name = "backtest_driver",
     srcs = ["backtest_driver.py"],
     visibility = ["//visibility:public"],
     deps = [
+        ":analytics",
         ":base",
+        ":data",
+        requirement("numpy"),
         requirement("polars"),
     ],
 )
@@ -81,8 +120,14 @@ py_test(
     name = "backtest_test",
     srcs = ["backtest_test.py"],
     deps = [
+        ":analytics",
         ":backtest_driver",
         ":base",
+        ":data",
+        requirement("numpy"),
         requirement("polars"),
     ],
 )
+
+
+

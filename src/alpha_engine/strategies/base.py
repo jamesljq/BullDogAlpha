@@ -1,79 +1,194 @@
+"""Base classes and interfaces for trading strategies and portfolio management."""
+
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
+
 
 class StrategyContext(ABC):
-    @abstractmethod
-    def get_positions(self) -> Dict[str, int]:
-        """Returns map of symbol to current position."""
-        pass
+  """Execution and portfolio context interface passed to trading strategies."""
 
-    @abstractmethod
-    def get_balance(self) -> float:
-        """Returns current available cash balance."""
-        pass
+  @abstractmethod
+  def get_positions(self) -> Dict[str, int]:
+    """Returns map of symbol to current position size."""
+    pass
 
-    @abstractmethod
-    def get_nav(self) -> float:
-        """Returns the Net Asset Value of this sub-portfolio."""
-        pass
+  @abstractmethod
+  def get_balance(self) -> float:
+    """Returns current available cash balance."""
+    pass
 
-    @abstractmethod
-    def get_available_risk_limits(self) -> Dict[str, Any]:
-        """Returns risk limit thresholds."""
-        pass
+  @abstractmethod
+  def get_nav(self) -> float:
+    """Returns the Net Asset Value of this sub-portfolio."""
+    pass
 
-    @abstractmethod
-    def submit_order(self, symbol: str, qty: int, side: str, price: float = 0.0) -> str:
-        """Submits order and returns unique order ID."""
-        pass
+  @abstractmethod
+  def get_available_risk_limits(self) -> Dict[str, Any]:
+    """Returns risk limit thresholds."""
+    pass
 
-    @abstractmethod
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancels a pending order."""
-        pass
+  @abstractmethod
+  def submit_order(
+      self,
+      symbol: str,
+      qty: int,
+      side: str,
+      price: float = 0.0,
+      order_type: str = "MARKET",
+  ) -> str:
+    """Submits order and returns unique order ID."""
+    pass
+
+  @abstractmethod
+  def cancel_order(self, order_id: str) -> bool:
+    """Cancels a pending order."""
+    pass
+
 
 class BaseStrategy(ABC):
-    def __init__(self, ctx: StrategyContext):
-        self.ctx = ctx
+  """Abstract base class for all Alpha Engine trading strategies."""
 
-    @abstractmethod
-    def on_bar(self, bar: Any) -> None:
-        """Callback invoked when a new synchronized bar or set of bars is received."""
-        pass
+  def __init__(self, ctx: StrategyContext):
+    self.ctx = ctx
 
-    @abstractmethod
-    def on_order_status(self, order_response: Any) -> None:
-        """Callback invoked when order status changes."""
-        pass
+  @abstractmethod
+  def on_bar(self, bar: Any) -> None:
+    """Callback invoked when a new synchronized bar or set of bars is received."""
+    pass
+
+  @abstractmethod
+  def on_order_status(self, order_response: Any) -> None:
+    """Callback invoked when order status changes."""
+    pass
+
 
 class SubPortfolio:
-    def __init__(self, initial_cash: float):
-        self.initial_cash = initial_cash
-        self.cash = initial_cash
-        self.positions: Dict[str, int] = {}
-        self.last_prices: Dict[str, float] = {}
+  """Tracks multi-asset cash, positions, cost basis, and realized/unrealized P&L."""
 
-    def update_price(self, symbol: str, price: float):
-        self.last_prices[symbol] = price
+  def __init__(self, initial_cash: float):
+    self.initial_cash = float(initial_cash)
+    self.cash = float(initial_cash)
+    self.positions: Dict[str, int] = {}
+    self.cost_basis: Dict[str, float] = {}
+    self.last_prices: Dict[str, float] = {}
+    self.realized_pnl: float = 0.0
+    self.total_commissions: float = 0.0
 
-    def get_nav(self) -> float:
-        position_value = sum(qty * self.last_prices.get(symbol, 0.0) for symbol, qty in self.positions.items())
-        return self.cash + position_value
+  def update_price(self, symbol: str, price: float) -> None:
+    """Updates the latest marked price for a symbol."""
+    self.last_prices[symbol] = float(price)
 
-    def process_fill(self, symbol: str, qty: int, side: str, exec_price: float, commission: float):
-        """Updates cash and positions upon a filled order.
-        qty: positive integer
-        side: 'BUY' or 'SELL'
-        """
-        self.update_price(symbol, exec_price)
-        cost = qty * exec_price
-        if side.upper() == 'BUY':
-            self.cash -= (cost + commission)
-            self.positions[symbol] = self.positions.get(symbol, 0) + qty
-        elif side.upper() == 'SELL':
-            self.cash += (cost - commission)
-            self.positions[symbol] = self.positions.get(symbol, 0) - qty
+  def get_nav(self) -> float:
+    """Computes total Net Asset Value (Cash + Market Value of Positions)."""
+    position_value = sum(
+        qty * self.last_prices.get(symbol, self.cost_basis.get(symbol, 0.0))
+        for symbol, qty in self.positions.items()
+    )
+    return self.cash + position_value
 
-        # Clean up zero positions
-        if self.positions.get(symbol) == 0:
-            del self.positions[symbol]
+  def get_gross_exposure(self) -> float:
+    """Computes total gross absolute position exposure."""
+    return sum(
+        abs(qty) * self.last_prices.get(symbol, self.cost_basis.get(symbol, 0.0))
+        for symbol, qty in self.positions.items()
+    )
+
+  def get_leverage(self) -> float:
+    """Computes current leverage ratio (Gross Exposure / NAV)."""
+    nav = self.get_nav()
+    if nav <= 0.0:
+      return 0.0
+    return self.get_gross_exposure() / nav
+
+  def process_fill(
+      self,
+      symbol: str,
+      qty: int,
+      side: str,
+      exec_price: float,
+      commission: float = 0.0,
+  ) -> float:
+    """Updates cash, positions, cost basis, and computes realized P&L on fills.
+
+    Args:
+        symbol: Ticker symbol.
+        qty: Positive integer number of units filled.
+        side: 'BUY' or 'SELL'.
+        exec_price: Executed price per share.
+        commission: Commission and exchange fees paid for this fill.
+
+    Returns:
+        The realized P&L generated by this fill (excluding or including commission).
+    """
+    if qty <= 0:
+      return 0.0
+
+    self.update_price(symbol, exec_price)
+    exec_cost = qty * exec_price
+    self.total_commissions += commission
+
+    current_pos = self.positions.get(symbol, 0)
+    current_cost = self.cost_basis.get(symbol, exec_price)
+    trade_realized_pnl = 0.0
+
+    side_upper = side.upper()
+
+    if side_upper == "BUY":
+      self.cash -= (exec_cost + commission)
+      if current_pos >= 0:
+        # Increasing or opening long position: update weighted average cost basis
+        total_qty = current_pos + qty
+        new_cost = ((current_pos * current_cost) + exec_cost) / total_qty
+        self.positions[symbol] = total_qty
+        self.cost_basis[symbol] = new_cost
+      else:
+        # Covering a short position (current_pos < 0)
+        short_qty = abs(current_pos)
+        closed_qty = min(short_qty, qty)
+        trade_realized_pnl = (current_cost - exec_price) * closed_qty - commission
+        self.realized_pnl += trade_realized_pnl
+
+        remaining_short = short_qty - closed_qty
+        if remaining_short > 0:
+          self.positions[symbol] = -remaining_short
+        else:
+          excess_long = qty - closed_qty
+          if excess_long > 0:
+            self.positions[symbol] = excess_long
+            self.cost_basis[symbol] = exec_price
+          else:
+            self.positions.pop(symbol, None)
+            self.cost_basis.pop(symbol, None)
+
+    elif side_upper == "SELL":
+      self.cash += (exec_cost - commission)
+      if current_pos <= 0:
+        # Increasing or opening short position: update weighted average cost basis
+        total_short = abs(current_pos) + qty
+        new_cost = ((abs(current_pos) * current_cost) + exec_cost) / total_short
+        self.positions[symbol] = -total_short
+        self.cost_basis[symbol] = new_cost
+      else:
+        # Closing a long position (current_pos > 0)
+        closed_qty = min(current_pos, qty)
+        trade_realized_pnl = (exec_price - current_cost) * closed_qty - commission
+        self.realized_pnl += trade_realized_pnl
+
+        remaining_long = current_pos - closed_qty
+        if remaining_long > 0:
+          self.positions[symbol] = remaining_long
+        else:
+          excess_short = qty - closed_qty
+          if excess_short > 0:
+            self.positions[symbol] = -excess_short
+            self.cost_basis[symbol] = exec_price
+          else:
+            self.positions.pop(symbol, None)
+            self.cost_basis.pop(symbol, None)
+
+    # Clean up exact zero positions
+    if symbol in self.positions and self.positions[symbol] == 0:
+      self.positions.pop(symbol, None)
+      self.cost_basis.pop(symbol, None)
+
+    return trade_realized_pnl

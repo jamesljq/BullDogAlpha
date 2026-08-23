@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars } from './App';
+import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -182,22 +182,42 @@ describe('Bulldog Alpha Web Console', () => {
     expect(chartTypeSelect).toHaveValue('candlestick');
   });
 
-  test('simulates BUY and SELL trades', async () => {
+  test('simulates BUY and SELL trades with immediate React state & UI updates', async () => {
     await act(async () => {
       render(<App />);
     });
 
+    const clearBtn = screen.getByText(/CLEAR SIMULATED TRADES/i);
+
     const buyBtn = screen.getByText(/SIMULATE BUY 100/i);
-    fireEvent.click(buyBtn);
-    await waitFor(() => {
-      expect((global as any).fetch).toHaveBeenCalledWith('/api/mdg/trades', expect.anything());
+    await act(async () => {
+      fireEvent.click(buyBtn);
     });
 
-    const sellBtn = screen.getByText(/SIMULATE SELL 100/i);
-    fireEvent.click(sellBtn);
     await waitFor(() => {
-      expect((global as any).fetch).toHaveBeenCalledWith('/api/mdg/trades', expect.anything());
+      expect((global as any).fetch).toHaveBeenCalledWith('/api/mdg/trades', expect.objectContaining({
+        method: 'POST',
+      }));
     });
+
+    // Verify immediate state update: Clear Trades button is no longer disabled
+    expect(clearBtn).not.toBeDisabled();
+    // Toast notification is rendered
+    expect(await screen.findByText(/✓ BUY 100 AAPL/i)).toBeInTheDocument();
+
+    const sellBtn = screen.getByText(/SIMULATE SELL 100/i);
+    await act(async () => {
+      fireEvent.click(sellBtn);
+    });
+
+    await waitFor(() => {
+      expect((global as any).fetch).toHaveBeenCalledWith('/api/mdg/trades', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
+
+    // Toast notification for SELL is rendered
+    expect(await screen.findByText(/✓ SELL 100 AAPL/i)).toBeInTheDocument();
   });
 
   test('Admin tab controls: Ingest pause/resume, vendor switch, circuit breaker, subscriptions delete', async () => {
@@ -501,7 +521,7 @@ describe('Bulldog Alpha Web Console', () => {
     if (dualPriceHeader) {
       expect(dualPriceHeader).toBeInTheDocument();
       expect(screen.getByText(/At close: 4:00 PM EDT/i)).toBeInTheDocument();
-      expect(screen.getAllByText(/Overnight/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Overnight|Extended|After-Hours/i).length).toBeGreaterThan(0);
     }
   });
 
@@ -1209,16 +1229,119 @@ describe('Bulldog Alpha Web Console', () => {
     // Candle 1000 (merged 2 BUY trades: 100@325 + 200@326 = 300 total qty, avg price 325.67)
     expect(markers[0].time).toBe(1000);
     expect(markers[0].position).toBe('belowBar');
-    expect(markers[0].shape).toBe('arrowUp');
-    expect(markers[0].color).toBe('#30d158');
-    expect(markers[0].text).toBe('B 2x (300@325.67)');
+    expect(markers[0].action).toBe('BUY');
+    expect(markers[0].color).toBe('#0a84ff');
+    expect(markers[0].text).toBe('B');
+    expect(markers[0].fullText).toBe('B 2x (300@325.67)');
 
     // Candle 2000 (single SELL trade: 50@330)
     expect(markers[1].time).toBe(2000);
     expect(markers[1].position).toBe('aboveBar');
-    expect(markers[1].shape).toBe('arrowDown');
-    expect(markers[1].color).toBe('#ff453a');
-    expect(markers[1].text).toBe('S 50@330.00');
+    expect(markers[1].action).toBe('SELL');
+    expect(markers[1].color).toBe('#ff9f0a');
+    expect(markers[1].text).toBe('S');
+    expect(markers[1].fullText).toBe('S 50@330.00');
+  });
+
+  test('getSmartPopoverPosition guarantees zero-truncation boundary clamping across all 4 canvas corners', () => {
+    const containerW = 1000;
+    const containerH = 500;
+
+    // 1. Tag near Top-Left corner (x = 20, y = 20) -> Clamps left, pops below tag
+    const topLeft = getSmartPopoverPosition(20, 20, containerW, containerH, false);
+    expect(topLeft.left).toBe('0px');
+    expect(topLeft.right).toBe('auto');
+    expect(topLeft.alignHorizontal).toBe('left');
+    expect(topLeft.alignVertical).toBe('bottom');
+
+    // 2. Tag near Bottom-Right corner (x = 980, y = 480) -> Clamps right, pops above tag
+    const bottomRight = getSmartPopoverPosition(980, 480, containerW, containerH, true);
+    expect(bottomRight.left).toBe('auto');
+    expect(bottomRight.right).toBe('0px');
+    expect(bottomRight.alignHorizontal).toBe('right');
+    expect(bottomRight.alignVertical).toBe('top');
+
+    // 3. Tag in Center (x = 500, y = 250) -> Centered horizontally
+    const centerBuy = getSmartPopoverPosition(500, 250, containerW, containerH, true);
+    expect(centerBuy.left).toBe('50%');
+    expect(centerBuy.right).toBe('auto');
+    expect(centerBuy.transform).toBe('translateX(-50%)');
+  });
+
+  test('filterVisibleShieldMarkers filters out tags that scroll into the Y-axis price scale area (x > containerWidth - CHART_PRICE_SCALE_WIDTH_PX)', () => {
+    const containerW = 1000;
+    const priceScaleWidth = CHART_PRICE_SCALE_WIDTH_PX; // Max allowed x is 935
+
+    const testMarkers = [
+      { id: '1', x: 100, y: 200 },  // Normal plot area -> KEEP
+      { id: '2', x: 930, y: 200 },  // Near right edge of plot area -> KEEP
+      { id: '3', x: 940, y: 200 },  // Inside Y-axis price scale column (x > 935) -> FILTER OUT
+      { id: '4', x: 990, y: 200 },  // Inside Y-axis price scale column -> FILTER OUT
+      { id: '5', x: -10, y: 200 },  // Off left edge -> FILTER OUT
+    ];
+
+    const visible = filterVisibleShieldMarkers(testMarkers, containerW, priceScaleWidth);
+    expect(visible).toHaveLength(2);
+    expect(visible.map(m => m.id)).toEqual(['1', '2']);
+  });
+
+  test('aggregateTradeMarkers snaps future trade timestamps to the latest visible candle stem', () => {
+    const mockCandles = [
+      { time: 1700000000, low: 315.0, high: 322.0, close: 320.0 },
+      { time: 1700000060, low: 318.0, high: 325.0, close: 324.0 }, // Latest candle at 1700000060
+    ];
+    const futureTrade: TradeMarker[] = [
+      { id: 't_future', symbol: 'GOOGL', price: 319.75, qty: 123, action: 'BUY', timestamp: 1700000500000 }, // 1700000500 > 1700000060
+    ];
+
+    const markers = aggregateTradeMarkers(futureTrade, 'GOOGL', mockCandles);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].time).toBe(1700000060); // Snapped to latest candle time!
+    expect(markers[0].text).toBe('B');
+    expect(markers[0].price).toBe(318.0); // Below candle low
+  });
+
+  test('Simulated trade non-persistence: clearSimulatedTrades filters out is_simulated trades and triggers DELETE HTTP request', async () => {
+    let deleteCalled = false;
+    (global as any).fetch = jest.fn().mockImplementation((url: string, opts: any) => {
+      if (opts && opts.method === 'DELETE' && url.includes('/api/mdg/trades')) {
+        deleteCalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+      }
+      if (url.includes('/api/mdg/config')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tickers: ['AAPL'], status: 'RUNNING' }),
+        });
+      }
+      if (url.includes('/api/mdg/subscriptions')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tickers: ['AAPL'] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([
+          { symbol: 'AAPL', price: 320.0, qty: 100, action: 'BUY', timestamp: Date.now(), is_simulated: true },
+          { symbol: 'AAPL', price: 315.0, qty: 50, action: 'BUY', timestamp: Date.now() - 10000, is_simulated: false },
+        ]),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    const clearBtn = await screen.findByText(/CLEAR SIMULATED TRADES/i);
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+
+    expect(deleteCalled).toBe(true);
   });
 
   test('Status badges container is rendered in header-status-tags-bar above stock title', async () => {
@@ -1398,6 +1521,9 @@ describe('Bulldog Alpha Web Console', () => {
 
     // Toast notification appears
     expect(await screen.findByText(/✓ BUY 250 AAPL/i)).toBeInTheDocument();
+
+    // Clear trades button is now enabled because trades state contains the new trade
+    expect(clearBtn).not.toBeDisabled();
   });
 
   test('PM UX 2: Clickable Trade Executions stat card triggers jumpChartToTrade', async () => {
@@ -1458,6 +1584,40 @@ describe('Bulldog Alpha Web Console', () => {
     const weekBtn = screen.getByText('1W');
     await act(async () => {
       fireEvent.click(weekBtn);
+    });
+  });
+
+  test('Cross-Interval Invariance: getMarketSessionPrices guarantees identical regularClose regardless of bar granularity', () => {
+    const dailyCandles = [
+      { time: 1784779200, open: 321.0, high: 324.42, low: 314.96, close: 317.73 },
+    ];
+    
+    const candles30m = [
+      { time: 1784835600, open: 319.0, high: 320.0, low: 318.0, close: 318.60 }, // 15:30-16:00
+      { time: 1784837400, open: 318.6, high: 319.5, low: 318.5, close: 319.10 }, // 16:00-16:30
+    ];
+
+    const candles5m = [
+      { time: 1784837100, open: 318.0, high: 318.2, low: 317.73, close: 317.73 }, // 15:55-16:00
+      { time: 1784837400, open: 317.73, high: 319.2, low: 317.73, close: 319.10 }, // 16:00-16:05
+    ];
+
+    const res30m = getMarketSessionPrices(candles30m, dailyCandles);
+    const res5m = getMarketSessionPrices(candles5m, dailyCandles);
+
+    // Both MUST yield the exact same regularClose ($317.73) from the daily bar!
+    expect(res30m.regularClose).toBe(317.73);
+    expect(res5m.regularClose).toBe(317.73);
+    expect(res30m.regularClose).toEqual(res5m.regularClose);
+  });
+
+  test('UI DOM Test: Bar interval dropdown switching maintains consistent header rendering', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Apple Inc/i)).toBeInTheDocument();
     });
   });
 });

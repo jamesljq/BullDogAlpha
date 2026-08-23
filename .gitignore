@@ -118,3 +118,5 @@ __pycache__/
 # Docker build staging
 /bin/
 local.flags
+coverage.out
+
