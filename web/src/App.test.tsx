@@ -1741,6 +1741,8 @@ describe('Bulldog Alpha Web Console', () => {
 
       expect(screen.getByTestId('tooltip-popover-sharpe')).toBeInTheDocument();
       expect(screen.getByText(/Sharpe Ratio \(夏普比率\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Measures excess return earned per unit of total annualized volatility/i)).toBeInTheDocument();
+      expect(screen.getByText(/衡量每承受一单位总风险所获得的超额年化收益/i)).toBeInTheDocument();
       expect(screen.getByText(/Exceptional/i)).toBeInTheDocument();
 
       fireEvent.mouseLeave(sharpeTooltip);
