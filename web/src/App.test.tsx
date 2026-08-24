@@ -2,7 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
+import App, { calculateRSI, calculateSMA, calculateEMA, calculateMACD, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -13,9 +13,13 @@ const mockCreateChart = jest.fn(() => ({
     setMarkers: jest.fn(),
   })),
   applyOptions: jest.fn(),
+  priceScale: jest.fn(() => ({
+    applyOptions: jest.fn(),
+  })),
   timeScale: jest.fn(() => ({
     fitContent: mockFitContent,
     setVisibleRange: jest.fn(),
+    subscribeVisibleTimeRangeChange: jest.fn(),
   })),
   remove: mockRemoveChart,
 }));
@@ -25,8 +29,10 @@ jest.mock('lightweight-charts', () => ({
   createChart: (...args: any[]) => mockCreateChart(...args),
   LineSeries: 'LineSeries',
   CandlestickSeries: 'CandlestickSeries',
+  HistogramSeries: 'HistogramSeries',
   createSeriesMarkers: jest.fn(),
 }));
+
 
 describe('Bulldog Alpha Web Console', () => {
   let wsInstance: any;
@@ -173,14 +179,15 @@ describe('Bulldog Alpha Web Console', () => {
     }
 
     const dropdowns = screen.getAllByRole('combobox');
-    const intervalSelect = dropdowns[0];
+    const intervalSelect = dropdowns.find(d => d.querySelector('option[value="15m"]')) || dropdowns[1];
     fireEvent.change(intervalSelect, { target: { value: '15m' } });
     expect(intervalSelect).toHaveValue('15m');
 
-    const chartTypeSelect = dropdowns[1];
+    const chartTypeSelect = dropdowns.find(d => d.querySelector('option[value="candlestick"]')) || dropdowns[2];
     fireEvent.change(chartTypeSelect, { target: { value: 'candlestick' } });
     expect(chartTypeSelect).toHaveValue('candlestick');
   });
+
 
   test('simulates BUY and SELL trades with immediate React state & UI updates', async () => {
     await act(async () => {
@@ -982,10 +989,86 @@ describe('Bulldog Alpha Web Console', () => {
     });
   });
 
+  test('Technical Indicators math: calculateSMA, calculateEMA, calculateMACD', () => {
 
+    const prices = [
+      { time: 1, value: 10 },
+      { time: 2, value: 12 },
+      { time: 3, value: 14 },
+      { time: 4, value: 16 },
+      { time: 5, value: 18 },
+      { time: 6, value: 20 },
+    ];
 
+    // SMA with period 3: at t=3 avg(10,12,14)=12.0, at t=4 avg(12,14,16)=14.0
+    const sma3 = calculateSMA(prices, 3);
+    expect(sma3.length).toBe(4);
+    expect(sma3[0]).toEqual({ time: 3, value: 12 });
+    expect(sma3[1]).toEqual({ time: 4, value: 14 });
+
+    // EMA with period 3: k = 2/(3+1) = 0.5
+    // t=1: 10
+    // t=2: 12*0.5 + 10*0.5 = 11
+    // t=3: 14*0.5 + 11*0.5 = 12.5
+    const ema3 = calculateEMA(prices, 3);
+    expect(ema3.length).toBe(6);
+    expect(ema3[0]).toEqual({ time: 1, value: 10 });
+    expect(ema3[1]).toEqual({ time: 2, value: 11 });
+    expect(ema3[2]).toEqual({ time: 3, value: 12.5 });
+
+    // MACD calculation on 30 price points
+    const dummySeries = Array.from({ length: 40 }, (_, i) => ({
+      time: 1000 + i * 60,
+      value: 100 + Math.sin(i / 3) * 15,
+    }));
+    const macd = calculateMACD(dummySeries, 12, 26, 9);
+    expect(macd).toHaveProperty('dif');
+    expect(macd).toHaveProperty('dea');
+    expect(macd).toHaveProperty('hist');
+    expect(macd).toHaveProperty('zeroLine');
+    expect(macd.dif.length).toBeGreaterThan(0);
+    expect(macd.dea.length).toBeGreaterThan(0);
+    expect(macd.hist.length).toBeGreaterThan(0);
+  });
+
+  test('Trading Terminal indicator toolbar toggles: Volume ON/OFF, MA selector, and MACD sub-pane ON/OFF', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    // 1. Volume Toggle Button
+    const volBtn = screen.getByRole('button', { name: /Vol ON/i });
+    expect(volBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(volBtn);
+    });
+    expect(screen.getByRole('button', { name: /Vol OFF/i })).toBeInTheDocument();
+
+    // 2. MACD Sub-Pane Toggle Button & Container
+    const macdBtn = screen.getByRole('button', { name: /MACD ON/i });
+    expect(macdBtn).toBeInTheDocument();
+    expect(screen.getByTestId('macd-chart-container')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(macdBtn);
+    });
+    expect(screen.getByRole('button', { name: /MACD OFF/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('macd-chart-container')).not.toBeInTheDocument();
+
+    // 3. Moving Average Selector
+    const maSelect = screen.getByTitle(/Moving Average overlay on main price chart/i);
+    expect(maSelect).toHaveValue('ema');
+    await act(async () => {
+      fireEvent.change(maSelect, { target: { value: 'sma' } });
+    });
+    expect(maSelect).toHaveValue('sma');
+    await act(async () => {
+      fireEvent.change(maSelect, { target: { value: 'none' } });
+    });
+    expect(maSelect).toHaveValue('none');
+  });
 
   test('Strategy toggles, Risk sliders, and DevMode Shutdown', async () => {
+
     (global as any).fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ success: true }),
