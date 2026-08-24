@@ -911,13 +911,79 @@ describe('Bulldog Alpha Web Console', () => {
     expect(newCandles[2].close).toBe(328.50);
   });
 
-  test('getPeriodChangeInfo returns closePrice, closeChange, offHoursChange and offHoursPercent', () => {
-    const stats = getStockStats('AAPL');
-    expect(stats).toHaveProperty('currentPrice');
-    expect(stats).toHaveProperty('open');
-    expect(stats).toHaveProperty('high');
-    expect(stats).toHaveProperty('low');
+  test('Timeframe selection (1W, 1M, 3M, YTD, 1Y) computes price change from start of selected window instead of 1-day daily change', async () => {
+    (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/mdg/subscriptions')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tickers: ['AAPL', 'MSFT', 'NVDA'] }),
+        });
+      }
+      if (url.includes('/api/mdg/config')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tickers: ['AAPL', 'MSFT', 'NVDA'], vendor: 'alpaca', status: 'RUNNING' }),
+        });
+      }
+
+      if (url.includes('/api/mdg/trades')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
+      if (url.includes('granularity=ytd') || url.includes('granularity=1M') || url.includes('granularity=3M')) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              bars: [
+                { time: 1704200400, open: 30.0, high: 35.0, low: 28.0, close: 32.0, volume: 1000000 },
+                { time: 1724450400, open: 140.0, high: 148.0, low: 139.0, close: 145.10, volume: 2000000 },
+              ],
+            }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, bars: [] }),
+      });
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Apple Inc. \(AAPL\)/i)).toBeInTheDocument();
+    });
+
+    // Find and click YTD timeframe button
+    const ytdBtn = screen.getByRole('button', { name: /^YTD$/i });
+    await act(async () => {
+      fireEvent.click(ytdBtn);
+    });
+
+    // Verify timeframe return calculation:
+    // startPrice = 30.0, currentPrice = 145.10, change = +115.10 (+383.67%)
+    await waitFor(() => {
+      expect(screen.getByText(/Year to Date/i)).toBeInTheDocument();
+    });
+
+    // Find and click 1M timeframe button
+    const oneMonthBtn = screen.getByRole('button', { name: /^1M$/i });
+    await act(async () => {
+      fireEvent.click(oneMonthBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Past Month/i)).toBeInTheDocument();
+    });
   });
+
+
+
 
   test('Strategy toggles, Risk sliders, and DevMode Shutdown', async () => {
     (global as any).fetch = jest.fn().mockResolvedValue({

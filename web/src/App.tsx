@@ -992,18 +992,27 @@ export default function App() {
     const offHoursChange = currentPrice - closePrice;
     const offHoursPercent = closePrice > 0 ? (offHoursChange / closePrice) * 100 : 0;
 
-    // Start price of the selected timeframe
+    // Determine the start price of the selected timeframe window
     let startPrice = currentPrice;
-    if (chartType === "candlestick" && candleRaw.length > 0) {
-      startPrice = candleRaw[0].open;
-    } else if (rawData.length > 0) {
-      startPrice = rawData[0].value;
+    if (selectedGranularity === '1d') {
+      startPrice = openPrice > 0 ? openPrice : currentPrice;
+    } else {
+      if (candleRaw.length > 0) {
+        startPrice = candleRaw[0].open || candleRaw[0].close || candleRaw[0].value || currentPrice;
+      } else if (rawData.length > 0) {
+        startPrice = rawData[0].value || currentPrice;
+      } else if (intradayCandles.length > 0) {
+        startPrice = intradayCandles[0].open || currentPrice;
+      }
     }
 
-    const change = currentPrice - startPrice;
+    const effectivePrice = currentPrice > 0 ? currentPrice : closePrice;
+    const change = effectivePrice - startPrice;
     const percent = startPrice > 0 ? (change / startPrice) * 100 : 0;
+
     return {
       currentPrice,
+      startPrice,
       change,
       percent,
       label: granObj.periodLabel,
@@ -1015,8 +1024,10 @@ export default function App() {
       offHoursChange,
       offHoursPercent,
       isOffHoursPositive: offHoursChange >= 0,
+      is1D: selectedGranularity === '1d',
     };
   };
+
 
   // Load real historical data from BFF
   const fetchHistoricalData = async (ticker: string, granularity: string, interval: string) => {
@@ -2257,8 +2268,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Yahoo Finance Style Dual-Price Header (Regular Close vs Off-Hours Live Price) */}
-                  {marketInfo.isClosed ? (
+                  {/* Yahoo Finance Style Dual-Price Header for 1D Off-Hours OR Unified Timeframe Return Display for Multi-Day Windows */}
+                  {selectedGranularity === '1d' && marketInfo.isClosed ? (
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '32px', marginTop: '6px', flexWrap: 'wrap' }} data-testid="dual-price-header">
                       {/* Card 1: Regular Market Close */}
                       <div>
@@ -2317,12 +2328,12 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    /* Standard Single Big Price Display for Regular Market Hours */
+                    /* Standard Timeframe Return Display for Selected Granularity (1W, 1M, 3M, YTD, 1Y, 5Y, ALL or 1D Open Market) */
                     <div>
                       <div style={{ fontSize: '38px', fontWeight: 700, color: '#ffffff', marginTop: '4px', letterSpacing: '-0.8px' }}>
-                        ${periodInfo.currentPrice > 0 ? periodInfo.currentPrice.toFixed(2) : currentStockStats.open.toFixed(2)}
+                        ${(periodInfo.currentPrice > 0 ? periodInfo.currentPrice : (periodInfo.closePrice > 0 ? periodInfo.closePrice : currentStockStats.open)).toFixed(2)}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
                         <span style={{
                           fontSize: '15px',
                           fontWeight: 600,
@@ -2333,9 +2344,22 @@ export default function App() {
                         <span style={{ fontSize: '13px', color: '#8e8e93', fontWeight: 500 }}>
                           {periodInfo.label}
                         </span>
+                        {marketInfo.isClosed && selectedGranularity !== '1d' && periodInfo.currentPrice > 0 && (
+                          <span style={{
+                            fontSize: '12px',
+                            color: '#aeaeb2',
+                            backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            marginLeft: '6px',
+                          }}>
+                            {marketInfo.sessionType === 'NIGHT' ? 'Overnight' : 'After-Hours'}: ${periodInfo.currentPrice.toFixed(2)} ({periodInfo.isOffHoursPositive ? '+' : ''}{periodInfo.offHoursPercent.toFixed(2)}%)
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
+
                   {dataSourceInfo.isMock && (
                     <div style={{
                       backgroundColor: 'rgba(255, 159, 10, 0.1)',
