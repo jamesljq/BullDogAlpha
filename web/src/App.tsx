@@ -2415,15 +2415,18 @@ export default function App() {
         tickData
       );
 
+      const currentBars = chartType === "line" ? ticks : candles;
+      const currentTimes = new Set(currentBars.map((b: any) => b.time));
+
       if (ema9SeriesRef.current && ema21SeriesRef.current && sma50SeriesRef.current) {
         if (showMa === "ema" && fullPriceBarsForCalc.length > 0) {
-          const ema9Data = calculateEMA(fullPriceBarsForCalc, 9);
-          const ema21Data = calculateEMA(fullPriceBarsForCalc, 21);
+          const ema9Data = calculateEMA(fullPriceBarsForCalc, 9).filter(d => currentTimes.has(d.time));
+          const ema21Data = calculateEMA(fullPriceBarsForCalc, 21).filter(d => currentTimes.has(d.time));
           ema9SeriesRef.current.setData(ema9Data);
           ema21SeriesRef.current.setData(ema21Data);
           sma50SeriesRef.current.setData([]);
         } else if (showMa === "sma" && fullPriceBarsForCalc.length > 0) {
-          const sma50Data = calculateSMA(fullPriceBarsForCalc, 50);
+          const sma50Data = calculateSMA(fullPriceBarsForCalc, 50).filter(d => currentTimes.has(d.time));
           ema9SeriesRef.current.setData([]);
           ema21SeriesRef.current.setData([]);
           sma50SeriesRef.current.setData(sma50Data);
@@ -2437,11 +2440,12 @@ export default function App() {
       // 3. Update Dedicated MACD Sub-Pane Series with full dataset lookback
       if (showMacd && fullPriceBarsForCalc.length > 0 && macdDifSeriesRef.current) {
         const macdRes = calculateMACD(fullPriceBarsForCalc);
-        macdDifSeriesRef.current.setData(macdRes.dif);
-        if (macdDeaSeriesRef.current) macdDeaSeriesRef.current.setData(macdRes.dea);
-        if (macdHistSeriesRef.current) macdHistSeriesRef.current.setData(macdRes.hist);
-        if (macdZeroSeriesRef.current) macdZeroSeriesRef.current.setData(macdRes.zeroLine);
+        macdDifSeriesRef.current.setData(macdRes.dif.filter(d => currentTimes.has(d.time)));
+        if (macdDeaSeriesRef.current) macdDeaSeriesRef.current.setData(macdRes.dea.filter(d => currentTimes.has(d.time)));
+        if (macdHistSeriesRef.current) macdHistSeriesRef.current.setData(macdRes.hist.filter(d => currentTimes.has(d.time)));
+        if (macdZeroSeriesRef.current) macdZeroSeriesRef.current.setData(macdRes.zeroLine.filter(d => currentTimes.has(d.time)));
       }
+
 
 
       // Re-fit chart viewport ONLY when user switches granularity/interval/symbol AND new data has populated
