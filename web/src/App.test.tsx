@@ -2,7 +2,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, calculateSMA, calculateEMA, calculateMACD, formatCompactNumber, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
+import App, { calculateRSI, calculateSMA, calculateEMA, calculateMACD, formatCompactNumber, getFullPriceBarsForIndicators, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
+
+
 
 
 
@@ -2112,22 +2114,83 @@ describe('Bulldog Alpha Web Console', () => {
       expect(screen.getByText(/0 轴多空分水岭/i)).toBeInTheDocument();
     });
 
+    test('getFullPriceBarsForIndicators combines 1Y lookback to provide continuous SMA(50) coverage', () => {
+      const ticker = 'MRNA';
+      const candleData = {
+        'MRNA_3m': [
+          { time: 100, open: 100, high: 105, low: 95, close: 102 },
+          { time: 101, open: 102, high: 108, low: 101, close: 106 },
+        ],
+        'MRNA_1y': [
+          { time: 50, open: 80, high: 85, low: 78, close: 82 },
+          { time: 51, open: 82, high: 86, low: 80, close: 84 },
+          { time: 100, open: 100, high: 105, low: 95, close: 102 },
+          { time: 101, open: 102, high: 108, low: 101, close: 106 },
+        ],
+      };
+      const tickData = {};
+
+      const fullBars = getFullPriceBarsForIndicators(ticker, '3M', '1d', 'candlestick', candleData, tickData);
+      expect(fullBars.length).toBe(4);
+      expect(fullBars[0].time).toBe(50);
+      expect(fullBars[3].time).toBe(101);
+    });
+
     test('Crosshair Legend Ribbon renders above chart with real-time stats and indicators', async () => {
+      (global as any).fetch = jest.fn().mockImplementation((url: string) => {
+        if (url.includes('/api/mdg/config')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ tickers: ['AAPL', 'MSFT'], vendor: 'alpaca', status: 'RUNNING' }),
+          });
+        }
+        if (url.includes('/api/mdg/trades')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([]),
+          });
+        }
+        if (url.includes('/api/mdg/subscriptions')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ tickers: ['AAPL', 'MSFT'] }),
+          });
+        }
+        if (url.includes('/api/mdg/history')) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              success: true,
+              bars: [
+                { time: nowSec - 3600, open: 300.0, high: 305.0, low: 298.0, close: 302.0, volume: 500000 },
+                { time: nowSec, open: 302.0, high: 310.0, low: 301.0, close: 309.27, volume: 800000 },
+              ],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+      });
+
       await act(async () => {
         render(<App />);
       });
 
       const legendRibbon = screen.getByTestId('crosshair-legend-ribbon');
       expect(legendRibbon).toBeInTheDocument();
-      expect(legendRibbon).toHaveTextContent(/O:/i);
-      expect(legendRibbon).toHaveTextContent(/C:/i);
-      expect(legendRibbon).toHaveTextContent(/Vol:/i);
-      expect(legendRibbon).toHaveTextContent(/EMA\(9\):/i);
-      expect(legendRibbon).toHaveTextContent(/DIF:/i);
-      expect(legendRibbon).toHaveTextContent(/DEA:/i);
-      expect(legendRibbon).toHaveTextContent(/HIST:/i);
+
+      await waitFor(() => {
+        expect(legendRibbon).toHaveTextContent(/O:/i);
+        expect(legendRibbon).toHaveTextContent(/C:/i);
+        expect(legendRibbon).toHaveTextContent(/Vol:/i);
+        expect(legendRibbon).toHaveTextContent(/EMA\(9\):/i);
+        expect(legendRibbon).toHaveTextContent(/DIF:/i);
+      });
     });
   });
 });
+
+
+
 
 

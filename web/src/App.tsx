@@ -523,6 +523,46 @@ export const getIntervalSeconds = (intervalStr: string): number => {
   }
 };
 
+export const getFullPriceBarsForIndicators = (
+  ticker: string,
+  granularity: string,
+  interval: string,
+  chartType: 'line' | 'candlestick',
+  candleData: Record<string, any[]>,
+  tickData: Record<string, any[]>
+): { time: number; value: number }[] => {
+  if (!ticker) return [];
+  const currentKey = `${ticker}_${granularity}`;
+  const currentBars: { time: number; value: number }[] = chartType === 'line'
+    ? (tickData[currentKey] || []).map(t => ({ time: t.time, value: t.value }))
+    : (candleData[currentKey] || []).map(c => ({ time: c.time, value: c.close }));
+
+  const isDaily = checkIsDailyOrHigher(granularity, interval);
+  if (isDaily) {
+    // Look for 1Y daily data or ALL daily data to provide full indicator lookback warm-up
+    const daily1y = candleData[`${ticker}_1y`] || candleData[`${ticker}_1Y`] || candleData[`${ticker}_all`] || [];
+
+    if (daily1y.length > currentBars.length) {
+      const currentTimes = new Set(currentBars.map(b => b.time));
+      const warmupBars: { time: number; value: number }[] = [];
+
+      for (const b of daily1y) {
+        if (!currentTimes.has(b.time)) {
+          if (currentBars.length === 0 || b.time < currentBars[0].time) {
+            warmupBars.push({ time: b.time, value: b.close });
+          }
+        }
+      }
+
+      const merged = [...warmupBars, ...currentBars].sort((a, b) => a.time - b.time);
+      return merged;
+    }
+  }
+
+  return currentBars;
+};
+
+
 interface IntervalOption {
   value: string;
   label: string;
@@ -1041,6 +1081,39 @@ export default function App() {
   const loadedKeyRef = useRef<string>("");
   const shouldFitContentRef = useRef<boolean>(true);
 
+  const liveChartContextRef = useRef<{
+    selectedTicker: string;
+    selectedGranularity: string;
+    selectedInterval: string;
+    chartType: 'line' | 'candlestick';
+    candleData: Record<string, any[]>;
+    tickData: Record<string, any[]>;
+    volumeData: Record<string, any[]>;
+    trades: TradeMarker[];
+  }>({
+    selectedTicker,
+    selectedGranularity,
+    selectedInterval,
+    chartType,
+    candleData,
+    tickData,
+    volumeData,
+    trades,
+  });
+
+  // Always keep liveChartContextRef synchronized on every render
+  useEffect(() => {
+    liveChartContextRef.current = {
+      selectedTicker,
+      selectedGranularity,
+      selectedInterval,
+      chartType,
+      candleData,
+      tickData,
+      volumeData,
+      trades,
+    };
+  });
 
   const updateActiveSeries = (series: any) => {
     activeSeriesRef.current = series;
@@ -1048,16 +1121,27 @@ export default function App() {
   };
 
   const getBarDetailAtTime = (timeSec: number): BarDetailInfo | null => {
-    if (!selectedTicker) return null;
-    const key = `${selectedTicker}_${selectedGranularity}`;
-    const candles = candleData[key] || [];
-    const ticks = tickData[key] || [];
-    const vols = volumeData[key] || [];
+    const ctx = liveChartContextRef.current;
+    if (!ctx.selectedTicker) return null;
+    const key = `${ctx.selectedTicker}_${ctx.selectedGranularity}`;
+    const candles = ctx.candleData[key] || [];
+    const ticks = ctx.tickData[key] || [];
+    const vols = ctx.volumeData[key] || [];
 
-    const isDaily = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
+    const isDaily = checkIsDailyOrHigher(ctx.selectedGranularity, ctx.selectedInterval);
     const dateObj = new Date(timeSec * 1000);
-    const dateStr = dateObj.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric" });
-    const timeStr = isDaily ? "" : dateObj.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }) + " EDT";
+    const dateStr = dateObj.toLocaleDateString("en-US", {
+      timeZone: isDaily ? "UTC" : "America/New_York",
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+    const timeStr = isDaily ? "" : dateObj.toLocaleTimeString("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }) + " EDT";
 
     let open: number | undefined;
     let high: number | undefined;
@@ -1066,8 +1150,20 @@ export default function App() {
     let change = 0;
     let percent = 0;
 
-    const candleIdx = candles.findIndex(c => c.time === timeSec);
-    if (candleIdx >= 0) {
+    // Find matching bar: exact match or closest bar within dataset
+    let candleIdx = candles.findIndex(c => c.time === timeSec);
+    if (candleIdx < 0 && candles.length > 0) {
+      let minDiff = Infinity;
+      candles.forEach((c, idx) => {
+        const diff = Math.abs(c.time - timeSec);
+        if (diff < minDiff) {
+          minDiff = diff;
+          candleIdx = idx;
+        }
+      });
+    }
+
+    if (candleIdx >= 0 && candles.length > 0) {
       const c = candles[candleIdx];
       open = c.open;
       high = c.high;
@@ -1077,8 +1173,18 @@ export default function App() {
       change = close - prevClose;
       percent = prevClose > 0 ? (change / prevClose) * 100 : 0;
     } else {
-      const tickIdx = ticks.findIndex(t => t.time === timeSec);
-      if (tickIdx >= 0) {
+      let tickIdx = ticks.findIndex(t => t.time === timeSec);
+      if (tickIdx < 0 && ticks.length > 0) {
+        let minDiff = Infinity;
+        ticks.forEach((t, idx) => {
+          const diff = Math.abs(t.time - timeSec);
+          if (diff < minDiff) {
+            minDiff = diff;
+            tickIdx = idx;
+          }
+        });
+      }
+      if (tickIdx >= 0 && ticks.length > 0) {
         close = ticks[tickIdx].value;
         const prevVal = tickIdx > 0 ? ticks[tickIdx - 1].value : close;
         change = close - prevVal;
@@ -1091,13 +1197,18 @@ export default function App() {
     }
 
     // Volume
-    const volItem = vols.find(v => v.time === timeSec);
+    const volItem = vols.find(v => v.time === timeSec) || (candleIdx >= 0 ? vols[candleIdx] : undefined);
     const volume = volItem ? volItem.value : undefined;
 
-    // Moving Averages & MACD
-    const priceBars = chartType === "line"
-      ? ticks.map(t => ({ time: t.time, value: t.value }))
-      : candles.map(c => ({ time: c.time, value: c.close }));
+    // Moving Averages & MACD with full extended dataset lookback
+    const fullBars = getFullPriceBarsForIndicators(
+      ctx.selectedTicker,
+      ctx.selectedGranularity,
+      ctx.selectedInterval,
+      ctx.chartType,
+      ctx.candleData,
+      ctx.tickData
+    );
 
     let ema9Val: number | null = null;
     let ema21Val: number | null = null;
@@ -1106,18 +1217,20 @@ export default function App() {
     let deaVal: number | null = null;
     let histVal: number | null = null;
 
-    if (priceBars.length > 0) {
-      const ema9List = calculateEMA(priceBars, 9);
-      const ema21List = calculateEMA(priceBars, 21);
-      const sma50List = calculateSMA(priceBars, 50);
-      const macdRes = calculateMACD(priceBars);
+    if (fullBars.length > 0) {
+      const ema9List = calculateEMA(fullBars, 9);
+      const ema21List = calculateEMA(fullBars, 21);
+      const sma50List = calculateSMA(fullBars, 50);
+      const macdRes = calculateMACD(fullBars);
 
-      ema9Val = ema9List.find(e => e.time === timeSec)?.value ?? null;
-      ema21Val = ema21List.find(e => e.time === timeSec)?.value ?? null;
-      sma50Val = sma50List.find(s => s.time === timeSec)?.value ?? null;
-      difVal = macdRes.dif.find(d => d.time === timeSec)?.value ?? null;
-      deaVal = macdRes.dea.find(d => d.time === timeSec)?.value ?? null;
-      histVal = macdRes.hist.find(h => h.time === timeSec)?.value ?? null;
+      const matchedTime = candleIdx >= 0 ? candles[candleIdx].time : timeSec;
+
+      ema9Val = ema9List.find(e => e.time === matchedTime)?.value ?? null;
+      ema21Val = ema21List.find(e => e.time === matchedTime)?.value ?? null;
+      sma50Val = sma50List.find(s => s.time === matchedTime)?.value ?? null;
+      difVal = macdRes.dif.find(d => d.time === matchedTime)?.value ?? null;
+      deaVal = macdRes.dea.find(d => d.time === matchedTime)?.value ?? null;
+      histVal = macdRes.hist.find(h => h.time === matchedTime)?.value ?? null;
     }
 
     return {
@@ -1141,9 +1254,10 @@ export default function App() {
   };
 
   const getLatestBarDetail = (): BarDetailInfo => {
-    const key = `${selectedTicker}_${selectedGranularity}`;
-    const candles = candleData[key] || [];
-    const ticks = tickData[key] || [];
+    const ctx = liveChartContextRef.current;
+    const key = `${ctx.selectedTicker}_${ctx.selectedGranularity}`;
+    const candles = ctx.candleData[key] || [];
+    const ticks = ctx.tickData[key] || [];
     const lastTime = candles.length > 0 ? candles[candles.length - 1].time : (ticks.length > 0 ? ticks[ticks.length - 1].time : Math.floor(Date.now() / 1000));
     return getBarDetailAtTime(lastTime) || {
       time: lastTime,
@@ -1154,6 +1268,7 @@ export default function App() {
       percent: periodInfo.percent,
     };
   };
+
 
 
   const resyncData = async () => {
@@ -1416,8 +1531,12 @@ export default function App() {
       if (selectedGranularity !== "1d") {
         fetchHistoricalData(selectedTicker, "1d", "30m");
       }
+      if (selectedGranularity !== "1y") {
+        fetchHistoricalData(selectedTicker, "1y", "1d");
+      }
     }
   }, [selectedTicker, selectedGranularity, selectedInterval, forceMockMode]);
+
 
   // Pre-fetch 1d market data for all watchlist subscriptions so real prices display immediately
   useEffect(() => {
@@ -2286,20 +2405,25 @@ export default function App() {
         }
       }
 
-      // 2. Update Moving Averages (EMA 9/21 vs SMA 50 on main chart)
-      const priceBarsForCalc = chartType === "line"
-        ? ticks.map(t => ({ time: t.time, value: t.value }))
-        : candles.map(c => ({ time: c.time, value: c.close }));
+      // 2. Update Moving Averages (EMA 9/21 vs SMA 50 on main chart) with full dataset lookback
+      const fullPriceBarsForCalc = getFullPriceBarsForIndicators(
+        selectedTicker,
+        selectedGranularity,
+        selectedInterval,
+        chartType,
+        candleData,
+        tickData
+      );
 
       if (ema9SeriesRef.current && ema21SeriesRef.current && sma50SeriesRef.current) {
-        if (showMa === "ema" && priceBarsForCalc.length > 0) {
-          const ema9Data = calculateEMA(priceBarsForCalc, 9);
-          const ema21Data = calculateEMA(priceBarsForCalc, 21);
+        if (showMa === "ema" && fullPriceBarsForCalc.length > 0) {
+          const ema9Data = calculateEMA(fullPriceBarsForCalc, 9);
+          const ema21Data = calculateEMA(fullPriceBarsForCalc, 21);
           ema9SeriesRef.current.setData(ema9Data);
           ema21SeriesRef.current.setData(ema21Data);
           sma50SeriesRef.current.setData([]);
-        } else if (showMa === "sma" && priceBarsForCalc.length > 0) {
-          const sma50Data = calculateSMA(priceBarsForCalc, 50);
+        } else if (showMa === "sma" && fullPriceBarsForCalc.length > 0) {
+          const sma50Data = calculateSMA(fullPriceBarsForCalc, 50);
           ema9SeriesRef.current.setData([]);
           ema21SeriesRef.current.setData([]);
           sma50SeriesRef.current.setData(sma50Data);
@@ -2310,14 +2434,15 @@ export default function App() {
         }
       }
 
-      // 3. Update Dedicated MACD Sub-Pane Series
-      if (showMacd && priceBarsForCalc.length > 0 && macdDifSeriesRef.current) {
-        const macdRes = calculateMACD(priceBarsForCalc);
+      // 3. Update Dedicated MACD Sub-Pane Series with full dataset lookback
+      if (showMacd && fullPriceBarsForCalc.length > 0 && macdDifSeriesRef.current) {
+        const macdRes = calculateMACD(fullPriceBarsForCalc);
         macdDifSeriesRef.current.setData(macdRes.dif);
         if (macdDeaSeriesRef.current) macdDeaSeriesRef.current.setData(macdRes.dea);
         if (macdHistSeriesRef.current) macdHistSeriesRef.current.setData(macdRes.hist);
         if (macdZeroSeriesRef.current) macdZeroSeriesRef.current.setData(macdRes.zeroLine);
       }
+
 
       // Re-fit chart viewport ONLY when user switches granularity/interval/symbol AND new data has populated
       if (shouldFitContentRef.current && hasData) {
