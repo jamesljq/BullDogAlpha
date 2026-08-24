@@ -31,7 +31,11 @@ py_library(
 py_library(
     name = "strategies",
     srcs = [
+        "strategies/__init__.py",
+        "strategies/mean_reversion_strategy.py",
+        "strategies/momentum_strategy.py",
         "strategies/rl_strategy.py",
+        "strategies/stat_arb_strategy.py",
         "strategies/trend_strategy.py",
     ],
     visibility = ["//visibility:public"],
@@ -42,6 +46,7 @@ py_library(
         requirement("onnxruntime"),
     ],
 )
+
 
 py_library(
     name = "engine",
@@ -128,6 +133,21 @@ py_test(
         requirement("polars"),
     ],
 )
+
+py_test(
+    name = "benchmark_validation_test",
+    srcs = ["benchmark_validation_test.py"],
+    deps = [
+        ":analytics",
+        ":backtest_driver",
+        ":base",
+        ":data",
+        ":strategies",
+        requirement("numpy"),
+        requirement("polars"),
+    ],
+)
+
 
 
 

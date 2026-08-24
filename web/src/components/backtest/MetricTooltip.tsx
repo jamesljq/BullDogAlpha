@@ -97,7 +97,51 @@ export const METRIC_DICTIONARY: Record<string, MetricHelpInfo> = {
     direction: 'lower',
     directionText: '越低越防御 (Lower = More Defensive)',
   },
+  alpha: {
+    title: "Jensen's Alpha (詹森阿尔法超额)",
+    definition: '超越标普500/纳指基准预期的纯粹主动超额年化收益率。正阿尔法代表策略具备真实超越大盘的选时选股能力。',
+    benchmarks: [
+      { label: 'Negative (跑输大盘)', range: '< 0%', color: '#ff453a' },
+      { label: 'Solid Alpha (稳健超额)', range: '0% ~ 4%', color: '#ffd60a' },
+      { label: 'Super Alpha (顶尖超额)', range: '> 4%', color: '#30d158' },
+    ],
+    direction: 'higher',
+    directionText: '越高越好 (Higher is Better)',
+  },
+  infoRatio: {
+    title: 'Information Ratio (信息比率 IR)',
+    definition: '主动超额收益与跟踪误差 (Tracking Error) 的比值，衡量战胜基准的稳定性和一致性。',
+    benchmarks: [
+      { label: 'Weak (不稳定)', range: '< 0.5', color: '#ffd60a' },
+      { label: 'Good (优良)', range: '0.5 ~ 1.0', color: '#30d158' },
+      { label: 'Exceptional (卓越机构级)', range: '> 1.0', color: '#00e5ff' },
+    ],
+    direction: 'higher',
+    directionText: '越高越好 (Higher is Better)',
+  },
+  trackingError: {
+    title: 'Tracking Error (跟踪误差)',
+    definition: '策略超额收益序列的标准差，衡量与基准大盘的分离波动度。',
+    benchmarks: [
+      { label: 'Close to Index (贴近大盘)', range: '< 3%', color: '#64d2ff' },
+      { label: 'Active (主动策略)', range: '3% ~ 8%', color: '#ffd60a' },
+      { label: 'High Divergence (高离散)', range: '> 8%', color: '#bf5af2' },
+    ],
+    direction: 'lower',
+    directionText: '越低越贴近基准 (Lower = Closer to Index)',
+  },
+  benchmarkCagr: {
+    title: 'Benchmark Baseline (大盘基准年化)',
+    definition: '标普500 (SPY) / 纳斯达克 (QQQ) 在同期的复合年化收益率。跑输大盘的量化策略不具备配置意义。',
+    benchmarks: [
+      { label: 'S&P 500 Baseline', range: '~ 10% / yr', color: '#64d2ff' },
+      { label: 'Nasdaq-100 Baseline', range: '~ 15% / yr', color: '#00e5ff' },
+    ],
+    direction: 'higher',
+    directionText: '基线对照 (Baseline)',
+  },
 };
+
 
 interface MetricTooltipProps {
   metricKey: keyof typeof METRIC_DICTIONARY;

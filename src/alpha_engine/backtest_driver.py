@@ -265,22 +265,23 @@ def compute_performance_metrics(
   return report.to_dict()
 
 
-def run_backtest_session(
-    market_data: Union[str, List[str], MarketDataManager, pl.DataFrame, pl.LazyFrame],
-    strategy_cls: Type[BaseStrategy],
+def run_backtest(
+    strategy_factory: Optional[Callable[[StrategyContext], BaseStrategy]] = None,
+    strategy_cls: Optional[Type[BaseStrategy]] = None,
+    market_data: Union[Dict[str, pl.DataFrame], str, List[str], MarketDataManager, pl.DataFrame, pl.LazyFrame] = None,
     initial_capital: float = 100000.0,
+    benchmark_data: Optional[Union[pl.DataFrame, pl.LazyFrame, List[float]]] = None,
+    slippage_model: Optional[SlippageModel] = None,
+    commission_model: Optional[CommissionModel] = None,
     slippage_gamma: float = 0.1,
     commission_rate: float = 0.0001,
     flat_fee: float = 1.0,
-    slippage_model: Optional[SlippageModel] = None,
-    commission_model: Optional[CommissionModel] = None,
-    benchmark_symbol: Optional[str] = None,
     symbols: Optional[List[str]] = None,
     start_ts: Optional[int] = None,
     end_ts: Optional[int] = None,
     **strategy_kwargs: Any,
-) -> Dict[str, Any]:
-  """Executes a multi-asset event-driven backtest session with strict temporal isolation."""
+) -> PerformanceReport:
+  """Executes an institutional quant backtest and returns a PerformanceReport object."""
   gc.collect()
 
   ctx = BacktestContext(
@@ -291,10 +292,27 @@ def run_backtest_session(
       commission_rate=commission_rate,
       flat_fee=flat_fee,
   )
-  strategy = strategy_cls(ctx, **strategy_kwargs)
 
-  # Materialize / scan input market data
-  if isinstance(market_data, MarketDataManager):
+  if strategy_factory is not None:
+    strategy = strategy_factory(ctx)
+  elif strategy_cls is not None:
+    strategy = strategy_cls(ctx, **strategy_kwargs)
+  else:
+    raise ValueError("Either strategy_factory or strategy_cls must be provided.")
+
+  # Handle dict of DataFrames (e.g. {"AAPL": df1, "MSFT": df2})
+  if isinstance(market_data, dict):
+    dfs = []
+    for sym, df_item in market_data.items():
+      if isinstance(df_item, pl.LazyFrame):
+        df_c = df_item.collect()
+      else:
+        df_c = df_item
+      if SYMBOL_COL not in df_c.columns:
+        df_c = df_c.with_columns(pl.lit(sym).alias(SYMBOL_COL))
+      dfs.append(df_c)
+    df = pl.concat(dfs) if dfs else pl.DataFrame()
+  elif isinstance(market_data, MarketDataManager):
     sym_list = symbols or market_data.list_available_symbols()
     lazy_df = market_data.scan_bars(sym_list, start_ts=start_ts, end_ts=end_ts)
     df = lazy_df.collect()
@@ -302,17 +320,14 @@ def run_backtest_session(
     df = market_data.collect()
   elif isinstance(market_data, pl.DataFrame):
     df = market_data
-  elif isinstance(market_data, list):
-    lazy_df = pl.scan_parquet(market_data).sort(TIMESTAMP_COL, descending=False)
-    df = lazy_df.collect()
-  elif isinstance(market_data, str):
+  elif isinstance(market_data, (list, str)):
     lazy_df = pl.scan_parquet(market_data).sort(TIMESTAMP_COL, descending=False)
     df = lazy_df.collect()
   else:
     raise ValueError(f"Unsupported market_data type: {type(market_data)}")
 
   if df.height == 0:
-    return compute_performance_metrics(ctx.nav_history, initial_capital)
+    return PerformanceAnalytics.generate_report(ctx.nav_history, initial_capital)
 
   norm_df = validate_and_normalize_schema(df).sort([TIMESTAMP_COL, SYMBOL_COL])
 
@@ -359,7 +374,7 @@ def run_backtest_session(
     # 5. Record NAV
     ctx.record_nav()
 
-  # Stream chronologically to completely eliminate lookahead bias
+  # Stream chronologically to eliminate lookahead bias
   for row in norm_df.iter_rows(named=True):
     ts = row[TIMESTAMP_COL]
     if current_ts is None:
@@ -375,12 +390,67 @@ def run_backtest_session(
   if current_group and current_ts is not None:
     process_group(current_ts, current_group)
 
+  # Align timestamps and benchmark data if provided
+  ts_list = ctx.timestamp_history
+  if len(ctx.nav_history) == len(ctx.timestamp_history) + 1 and ctx.timestamp_history:
+    first_ts = ctx.timestamp_history[0]
+    ts_list = [first_ts - 86400000] + ctx.timestamp_history
+
+  benchmark_nav: Optional[List[float]] = None
+  if benchmark_data is not None:
+    if isinstance(benchmark_data, list):
+      benchmark_nav = benchmark_data
+    elif isinstance(benchmark_data, (pl.DataFrame, pl.LazyFrame)):
+      b_df = benchmark_data.collect() if isinstance(benchmark_data, pl.LazyFrame) else benchmark_data
+      b_norm = validate_and_normalize_schema(b_df).sort(TIMESTAMP_COL)
+      b_closes = b_norm[CLOSE_COL].to_list()
+      if b_closes:
+        b_init = b_closes[0]
+        # Align length with nav_history
+        benchmark_nav = [initial_capital] + [initial_capital * (c / b_init) for c in b_closes]
+
   # Generate performance report
   report = PerformanceAnalytics.generate_report(
       nav_history=ctx.nav_history,
       initial_capital=initial_capital,
-      timestamps=ctx.timestamp_history,
+      timestamps=ts_list,
       trades=ctx.trade_history,
+      benchmark_nav=benchmark_nav,
   )
 
+  return report
+
+
+
+def run_backtest_session(
+    market_data: Union[Dict[str, pl.DataFrame], str, List[str], MarketDataManager, pl.DataFrame, pl.LazyFrame],
+    strategy_cls: Type[BaseStrategy],
+    initial_capital: float = 100000.0,
+    slippage_gamma: float = 0.1,
+    commission_rate: float = 0.0001,
+    flat_fee: float = 1.0,
+    slippage_model: Optional[SlippageModel] = None,
+    commission_model: Optional[CommissionModel] = None,
+    benchmark_symbol: Optional[str] = None,
+    symbols: Optional[List[str]] = None,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+    **strategy_kwargs: Any,
+) -> Dict[str, Any]:
+  """Executes a multi-asset event-driven backtest session and returns dictionary."""
+  report = run_backtest(
+      strategy_cls=strategy_cls,
+      market_data=market_data,
+      initial_capital=initial_capital,
+      slippage_gamma=slippage_gamma,
+      commission_rate=commission_rate,
+      flat_fee=flat_fee,
+      slippage_model=slippage_model,
+      commission_model=commission_model,
+      symbols=symbols,
+      start_ts=start_ts,
+      end_ts=end_ts,
+      **strategy_kwargs,
+  )
   return report.to_dict()
+

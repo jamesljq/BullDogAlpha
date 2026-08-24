@@ -58,6 +58,11 @@ class PerformanceReport:
   beta: Optional[float] = None
   alpha: Optional[float] = None
   information_ratio: Optional[float] = None
+  benchmark_total_return_pct: Optional[float] = None
+  benchmark_cagr_pct: Optional[float] = None
+  tracking_error: Optional[float] = None
+  up_capture_ratio: Optional[float] = None
+  down_capture_ratio: Optional[float] = None
 
   def to_dict(self) -> Dict[str, Any]:
     return asdict(self)
@@ -364,9 +369,29 @@ class PerformanceAnalytics:
           else 0.0,
       })
 
-    # Benchmark analytics (Beta, Alpha, Information Ratio)
+    # Benchmark analytics (Beta, Alpha, Information Ratio, Capture Ratios)
     beta, alpha, info_ratio = None, None, None
+    bench_tot_ret, bench_cagr, tr_err = None, None, None
+    up_capture, down_capture = None, None
+
     if benchmark_nav and len(benchmark_nav) == len(nav_history) and n > 1:
+      bench_init = benchmark_nav[0]
+      bench_final = benchmark_nav[-1]
+      bench_tot_ret = ((bench_final - bench_init) / bench_init * 100.0) if bench_init > 0 else 0.0
+
+      if time_span_years >= 0.05 and bench_final > 0 and bench_init > 0:
+        try:
+          b_ratio = bench_final / bench_init
+          b_exp = 1.0 / time_span_years
+          if b_exp * math.log(max(1e-9, b_ratio)) < 500:
+            bench_cagr = ((b_ratio ** b_exp) - 1.0) * 100.0
+          else:
+            bench_cagr = bench_tot_ret
+        except (OverflowError, ValueError):
+          bench_cagr = bench_tot_ret
+      else:
+        bench_cagr = bench_tot_ret
+
       bench_returns = []
       for i in range(1, len(benchmark_nav)):
         b_prev = benchmark_nav[i - 1]
@@ -381,9 +406,25 @@ class PerformanceAnalytics:
 
         # Tracking Error & Information Ratio
         excess_returns = np.array(returns) - np.array(bench_returns)
-        tracking_error = float(np.std(excess_returns, ddof=1)) * af
-        if tracking_error > 0:
-          info_ratio = (float(np.mean(excess_returns)) * (af ** 2)) / tracking_error
+        tr_err = float(np.std(excess_returns, ddof=1)) * af
+        if tr_err > 0:
+          info_ratio = (float(np.mean(excess_returns)) * (af ** 2)) / tr_err
+
+        # Up / Down Market Capture Ratios
+        up_bench_idx = [i for i, r in enumerate(bench_returns) if r > 0]
+        down_bench_idx = [i for i, r in enumerate(bench_returns) if r < 0]
+
+        if up_bench_idx:
+          up_bench_mean = np.mean([bench_returns[i] for i in up_bench_idx])
+          up_strat_mean = np.mean([returns[i] for i in up_bench_idx])
+          if abs(up_bench_mean) > 1e-8:
+            up_capture = float((up_strat_mean / up_bench_mean) * 100.0)
+
+        if down_bench_idx:
+          down_bench_mean = np.mean([bench_returns[i] for i in down_bench_idx])
+          down_strat_mean = np.mean([returns[i] for i in down_bench_idx])
+          if abs(down_bench_mean) > 1e-8:
+            down_capture = float((down_strat_mean / down_bench_mean) * 100.0)
 
     return PerformanceReport(
         initial_capital=initial_capital,
@@ -414,4 +455,10 @@ class PerformanceAnalytics:
         beta=beta,
         alpha=alpha,
         information_ratio=info_ratio,
+        benchmark_total_return_pct=bench_tot_ret,
+        benchmark_cagr_pct=bench_cagr,
+        tracking_error=tr_err,
+        up_capture_ratio=up_capture,
+        down_capture_ratio=down_capture,
     )
+
