@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createChart, LineSeries, CandlestickSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts';
 import { BacktestingLab } from './components/backtest/BacktestingLab';
+import { IndicatorGuideTooltip } from './components/terminal/IndicatorGuideTooltip';
+
 
 export const calculateSMA = (
   data: { time: number; value: number }[],
@@ -106,8 +108,37 @@ export const calculateMACD = (
   };
 };
 
+export const formatCompactNumber = (val: number): string => {
+  if (isNaN(val) || val === null || val === undefined) return '--';
+  if (val >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(2)}B`;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
+  return val.toLocaleString();
+};
+
+export interface BarDetailInfo {
+  time: number;
+  dateStr: string;
+  timeStr: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close: number;
+  volume?: number;
+  change?: number;
+  percent?: number;
+  ema9?: number | null;
+  ema21?: number | null;
+  sma50?: number | null;
+  dif?: number | null;
+  dea?: number | null;
+  hist?: number | null;
+  x?: number;
+  y?: number;
+}
 
 // Types matching the Go BFF JSON messages
+
 interface HealthStatus {
   status: string;
   latency_ms: number;
@@ -984,6 +1015,9 @@ export default function App() {
   }>>([]);
   const [hoveredShieldId, setHoveredShieldId] = useState<string | null>(null);
   const [pinnedShieldId, setPinnedShieldId] = useState<string | null>(null);
+  const [hoverBarInfo, setHoverBarInfo] = useState<BarDetailInfo | null>(null);
+  const [pinnedBarInfo, setPinnedBarInfo] = useState<BarDetailInfo | null>(null);
+
 
   const wsRef = useRef<WebSocket | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -1012,6 +1046,115 @@ export default function App() {
     activeSeriesRef.current = series;
     setActiveSeries(series);
   };
+
+  const getBarDetailAtTime = (timeSec: number): BarDetailInfo | null => {
+    if (!selectedTicker) return null;
+    const key = `${selectedTicker}_${selectedGranularity}`;
+    const candles = candleData[key] || [];
+    const ticks = tickData[key] || [];
+    const vols = volumeData[key] || [];
+
+    const isDaily = checkIsDailyOrHigher(selectedGranularity, selectedInterval);
+    const dateObj = new Date(timeSec * 1000);
+    const dateStr = dateObj.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric" });
+    const timeStr = isDaily ? "" : dateObj.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }) + " EDT";
+
+    let open: number | undefined;
+    let high: number | undefined;
+    let low: number | undefined;
+    let close = 0;
+    let change = 0;
+    let percent = 0;
+
+    const candleIdx = candles.findIndex(c => c.time === timeSec);
+    if (candleIdx >= 0) {
+      const c = candles[candleIdx];
+      open = c.open;
+      high = c.high;
+      low = c.low;
+      close = c.close;
+      const prevClose = candleIdx > 0 ? candles[candleIdx - 1].close : c.open;
+      change = close - prevClose;
+      percent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    } else {
+      const tickIdx = ticks.findIndex(t => t.time === timeSec);
+      if (tickIdx >= 0) {
+        close = ticks[tickIdx].value;
+        const prevVal = tickIdx > 0 ? ticks[tickIdx - 1].value : close;
+        change = close - prevVal;
+        percent = prevVal > 0 ? (change / prevVal) * 100 : 0;
+      }
+    }
+
+    if (close === 0 && candles.length > 0) {
+      close = candles[candles.length - 1].close;
+    }
+
+    // Volume
+    const volItem = vols.find(v => v.time === timeSec);
+    const volume = volItem ? volItem.value : undefined;
+
+    // Moving Averages & MACD
+    const priceBars = chartType === "line"
+      ? ticks.map(t => ({ time: t.time, value: t.value }))
+      : candles.map(c => ({ time: c.time, value: c.close }));
+
+    let ema9Val: number | null = null;
+    let ema21Val: number | null = null;
+    let sma50Val: number | null = null;
+    let difVal: number | null = null;
+    let deaVal: number | null = null;
+    let histVal: number | null = null;
+
+    if (priceBars.length > 0) {
+      const ema9List = calculateEMA(priceBars, 9);
+      const ema21List = calculateEMA(priceBars, 21);
+      const sma50List = calculateSMA(priceBars, 50);
+      const macdRes = calculateMACD(priceBars);
+
+      ema9Val = ema9List.find(e => e.time === timeSec)?.value ?? null;
+      ema21Val = ema21List.find(e => e.time === timeSec)?.value ?? null;
+      sma50Val = sma50List.find(s => s.time === timeSec)?.value ?? null;
+      difVal = macdRes.dif.find(d => d.time === timeSec)?.value ?? null;
+      deaVal = macdRes.dea.find(d => d.time === timeSec)?.value ?? null;
+      histVal = macdRes.hist.find(h => h.time === timeSec)?.value ?? null;
+    }
+
+    return {
+      time: timeSec,
+      dateStr,
+      timeStr,
+      open,
+      high,
+      low,
+      close,
+      volume,
+      change,
+      percent,
+      ema9: ema9Val,
+      ema21: ema21Val,
+      sma50: sma50Val,
+      dif: difVal,
+      dea: deaVal,
+      hist: histVal,
+    };
+  };
+
+  const getLatestBarDetail = (): BarDetailInfo => {
+    const key = `${selectedTicker}_${selectedGranularity}`;
+    const candles = candleData[key] || [];
+    const ticks = tickData[key] || [];
+    const lastTime = candles.length > 0 ? candles[candles.length - 1].time : (ticks.length > 0 ? ticks[ticks.length - 1].time : Math.floor(Date.now() / 1000));
+    return getBarDetailAtTime(lastTime) || {
+      time: lastTime,
+      dateStr: new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric" }),
+      timeStr: new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }) + " EDT",
+      close: periodInfo.currentPrice > 0 ? periodInfo.currentPrice : periodInfo.closePrice,
+      change: periodInfo.change,
+      percent: periodInfo.percent,
+    };
+  };
+
 
   const resyncData = async () => {
     fetchMdgConfig();
@@ -1845,6 +1988,36 @@ export default function App() {
         updateActiveSeries(series);
         seriesMarkersRef.current = createSeriesMarkers(series, []);
 
+        try {
+          chart.subscribeCrosshairMove((param: any) => {
+            if (!param || !param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+              setHoverBarInfo(null);
+              return;
+            }
+            const ts = typeof param.time === 'number' ? param.time : (param.time?.timestamp ?? 0);
+            if (ts > 0) {
+              const detail = getBarDetailAtTime(ts);
+              if (detail) {
+                setHoverBarInfo({ ...detail, x: param.point.x, y: param.point.y });
+              }
+            }
+          });
+
+          chart.subscribeClick((param: any) => {
+            if (!param || !param.time || !param.point) {
+              setPinnedBarInfo(null);
+              return;
+            }
+            const ts = typeof param.time === 'number' ? param.time : (param.time?.timestamp ?? 0);
+            if (ts > 0) {
+              const detail = getBarDetailAtTime(ts);
+              if (detail) {
+                setPinnedBarInfo(prev => (prev && prev.time === ts) ? null : { ...detail, x: param.point.x, y: param.point.y });
+              }
+            }
+          });
+        } catch (e) {}
+
         const handleResize = () => {
           if (chartContainerRef.current && chartRef.current) {
             chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
@@ -1856,6 +2029,7 @@ export default function App() {
           window.removeEventListener('resize', handleResize);
           chart.remove();
         };
+
       } catch (e) {
         console.warn("Vite Lightweight charts skipped (jsdom test environment detected):", e);
       }
@@ -2030,7 +2204,36 @@ export default function App() {
           } catch (e) {}
           isSyncing = false;
         });
+
+        macdChart.subscribeCrosshairMove((param: any) => {
+          if (!param || !param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+            setHoverBarInfo(null);
+            return;
+          }
+          const ts = typeof param.time === 'number' ? param.time : (param.time?.timestamp ?? 0);
+          if (ts > 0) {
+            const detail = getBarDetailAtTime(ts);
+            if (detail) {
+              setHoverBarInfo({ ...detail, x: param.point.x, y: param.point.y });
+            }
+          }
+        });
+
+        macdChart.subscribeClick((param: any) => {
+          if (!param || !param.time || !param.point) {
+            setPinnedBarInfo(null);
+            return;
+          }
+          const ts = typeof param.time === 'number' ? param.time : (param.time?.timestamp ?? 0);
+          if (ts > 0) {
+            const detail = getBarDetailAtTime(ts);
+            if (detail) {
+              setPinnedBarInfo(prev => (prev && prev.time === ts) ? null : { ...detail, x: param.point.x, y: param.point.y });
+            }
+          }
+        });
       }
+
 
       const handleResize = () => {
         if (macdContainerRef.current && macdChartRef.current) {
@@ -2578,70 +2781,79 @@ export default function App() {
                         <span>{showTradeMarkers ? '👁️ Markers ON' : '🙈 Markers OFF'}</span>
                       </button>
 
-                      {/* Volume Overlay Toggle */}
-                      <button
-                        className="apple-btn"
-                        onClick={() => setShowVolume(prev => !prev)}
-                        style={{
-                          backgroundColor: showVolume ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                          border: `1px solid ${showVolume ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
-                          color: showVolume ? '#30d158' : '#aeaeb2',
-                          borderRadius: '10px',
-                          padding: '6px 10px',
-                          fontSize: '12.5px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title="Toggle Volume overlay on main chart"
-                      >
-                        <span>{showVolume ? '📊 Vol ON' : '📊 Vol OFF'}</span>
-                      </button>
+                      {/* Volume Overlay Toggle & Guide */}
+                      <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <button
+                          className="apple-btn"
+                          onClick={() => setShowVolume(prev => !prev)}
+                          style={{
+                            backgroundColor: showVolume ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                            border: `1px solid ${showVolume ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                            color: showVolume ? '#30d158' : '#aeaeb2',
+                            borderRadius: '10px',
+                            padding: '6px 10px',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="Toggle Volume overlay on main chart"
+                        >
+                          <span>{showVolume ? '📊 Vol ON' : '📊 Vol OFF'}</span>
+                        </button>
+                        <IndicatorGuideTooltip indicator="volume" />
+                      </div>
 
-                      {/* Moving Average Selector (EMA 9/21 vs SMA 50) */}
-                      <select
-                        value={showMa}
-                        onChange={(e) => setShowMa(e.target.value as any)}
-                        style={{
-                          ...styles.dropdown,
-                          backgroundColor: showMa !== 'none' ? 'rgba(0, 229, 255, 0.12)' : 'rgba(255, 255, 255, 0.05)',
-                          borderColor: showMa !== 'none' ? 'rgba(0, 229, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)',
-                          color: showMa !== 'none' ? '#00e5ff' : '#aeaeb2',
-                          fontSize: '12.5px',
-                          padding: '6px 10px',
-                        }}
-                        title="Moving Average overlay on main price chart"
-                      >
-                        <option value="ema">📈 EMA (9, 21)</option>
-                        <option value="sma">📈 SMA (50)</option>
-                        <option value="none">📈 MA Off</option>
-                      </select>
+                      {/* Moving Average Selector & Guide */}
+                      <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <select
+                          value={showMa}
+                          onChange={(e) => setShowMa(e.target.value as any)}
+                          style={{
+                            ...styles.dropdown,
+                            backgroundColor: showMa !== 'none' ? 'rgba(0, 229, 255, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                            borderColor: showMa !== 'none' ? 'rgba(0, 229, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)',
+                            color: showMa !== 'none' ? '#00e5ff' : '#aeaeb2',
+                            fontSize: '12.5px',
+                            padding: '6px 10px',
+                          }}
+                          title="Moving Average overlay on main price chart"
+                        >
+                          <option value="ema">📈 EMA (9, 21)</option>
+                          <option value="sma">📈 SMA (50)</option>
+                          <option value="none">📈 MA Off</option>
+                        </select>
+                        <IndicatorGuideTooltip indicator={showMa === 'sma' ? 'sma' : 'ema'} />
+                      </div>
 
-                      {/* MACD Sub-Pane Toggle */}
-                      <button
-                        className="apple-btn"
-                        onClick={() => setShowMacd(prev => !prev)}
-                        style={{
-                          backgroundColor: showMacd ? 'rgba(255, 159, 10, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                          border: `1px solid ${showMacd ? 'rgba(255, 159, 10, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
-                          color: showMacd ? '#ff9f0a' : '#aeaeb2',
-                          borderRadius: '10px',
-                          padding: '6px 10px',
-                          fontSize: '12.5px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title="Toggle synchronized MACD sub-pane"
-                      >
-                        <span>{showMacd ? '⚡ MACD ON' : '⚡ MACD OFF'}</span>
-                      </button>
+                      {/* MACD Sub-Pane Toggle & Guide */}
+                      <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <button
+                          className="apple-btn"
+                          onClick={() => setShowMacd(prev => !prev)}
+                          style={{
+                            backgroundColor: showMacd ? 'rgba(255, 159, 10, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                            border: `1px solid ${showMacd ? 'rgba(255, 159, 10, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                            color: showMacd ? '#ff9f0a' : '#aeaeb2',
+                            borderRadius: '10px',
+                            padding: '6px 10px',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="Toggle synchronized MACD sub-pane"
+                        >
+                          <span>{showMacd ? '⚡ MACD ON' : '⚡ MACD OFF'}</span>
+                        </button>
+                        <IndicatorGuideTooltip indicator="macd" />
+                      </div>
 
                       {/* TradingView Bar Interval Dropdown */}
                       <select
@@ -2681,6 +2893,7 @@ export default function App() {
                         <option value="candlestick">🕯️ Candlestick</option>
                       </select>
                     </div>
+
 
                   </div>
 
@@ -2847,17 +3060,187 @@ export default function App() {
                 </div>
               )}
 
+
+              {/* Real-Time Dynamic Crosshair Legend Ribbon */}
+              {(() => {
+                const activeBar = hoverBarInfo || getLatestBarDetail();
+                const isPositive = (activeBar.change ?? 0) >= 0;
+                return (
+                  <div
+                    data-testid="crosshair-legend-ribbon"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '14px',
+                      padding: '8px 14px',
+                      marginBottom: '10px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '10px',
+                      fontSize: '12.5px',
+                      color: '#aeaeb2',
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {/* Date / Time */}
+                    <span style={{ color: '#ffffff', fontWeight: 600 }}>
+                      📅 {activeBar.dateStr} {activeBar.timeStr}
+                    </span>
+
+                    {/* OHLC or Single Price */}
+                    {chartType === 'candlestick' && activeBar.open !== undefined ? (
+                      <div style={{ display: 'inline-flex', gap: '8px', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px' }}>
+                        <span>O: <strong style={{ color: '#ffffff' }}>${activeBar.open.toFixed(2)}</strong></span>
+                        <span>H: <strong style={{ color: '#ffffff' }}>${activeBar.high?.toFixed(2)}</strong></span>
+                        <span>L: <strong style={{ color: '#ffffff' }}>${activeBar.low?.toFixed(2)}</strong></span>
+                        <span>C: <strong style={{ color: '#ffffff' }}>${activeBar.close.toFixed(2)}</strong></span>
+                      </div>
+                    ) : (
+                      <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px' }}>
+                        Price: <strong style={{ color: '#ffffff' }}>${activeBar.close.toFixed(2)}</strong>
+                      </span>
+                    )}
+
+                    {/* Change & Percent */}
+                    {activeBar.change !== undefined && (
+                      <span style={{ fontWeight: 700, color: isPositive ? '#30d158' : '#ff453a' }}>
+                        {isPositive ? '▲ +' : '▼ -'}${Math.abs(activeBar.change).toFixed(2)} ({isPositive ? '+' : ''}{activeBar.percent?.toFixed(2)}%)
+                      </span>
+                    )}
+
+                    {/* Volume */}
+                    {showVolume && activeBar.volume !== undefined && (
+                      <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px' }}>
+                        Vol: <strong style={{ color: '#30d158' }}>{formatCompactNumber(activeBar.volume)}</strong>
+                      </span>
+                    )}
+
+                    {/* Moving Averages */}
+                    {showMa === 'ema' && (activeBar.ema9 != null || activeBar.ema21 != null) && (
+                      <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px', display: 'inline-flex', gap: '8px' }}>
+                        <span style={{ color: '#00e5ff' }}>EMA(9): <strong>{activeBar.ema9 != null ? `$${activeBar.ema9.toFixed(2)}` : '--'}</strong></span>
+                        <span style={{ color: '#ff9f0a' }}>EMA(21): <strong>{activeBar.ema21 != null ? `$${activeBar.ema21.toFixed(2)}` : '--'}</strong></span>
+                      </span>
+                    )}
+                    {showMa === 'sma' && activeBar.sma50 != null && (
+                      <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px' }}>
+                        <span style={{ color: '#bf5af2' }}>SMA(50): <strong>{activeBar.sma50 != null ? `$${activeBar.sma50.toFixed(2)}` : '--'}</strong></span>
+                      </span>
+                    )}
+
+                    {/* MACD */}
+                    {showMacd && (activeBar.dif != null || activeBar.dea != null) && (
+                      <span style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '10px', display: 'inline-flex', gap: '8px' }}>
+                        <span style={{ color: '#00e5ff' }}>DIF: <strong>{activeBar.dif != null ? activeBar.dif.toFixed(2) : '--'}</strong></span>
+                        <span style={{ color: '#ff9f0a' }}>DEA: <strong>{activeBar.dea != null ? activeBar.dea.toFixed(2) : '--'}</strong></span>
+                        <span style={{ color: (activeBar.hist ?? 0) >= 0 ? '#30d158' : '#ff453a' }}>
+                          HIST: <strong>{activeBar.hist != null ? `${(activeBar.hist >= 0 ? '+' : '')}${activeBar.hist.toFixed(2)}` : '--'}</strong>
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Canvas Container & Futu Small Shield Tag Overlay */}
               <div
                 ref={chartContainerRef}
-                onClick={() => setPinnedShieldId(null)}
+                onClick={() => {
+                  setPinnedShieldId(null);
+                  setPinnedBarInfo(null);
+                }}
                 style={{
                   border: '1px solid rgba(255,255,255,0.06)',
                   borderRadius: '12px',
-                  overflow: (hoveredShieldId || pinnedShieldId) ? 'visible' : 'hidden',
+                  overflow: (hoveredShieldId || pinnedShieldId || pinnedBarInfo) ? 'visible' : 'hidden',
                   position: 'relative',
                 }}
               >
+                {/* Click-to-Pin Bar Inspection Card */}
+                {pinnedBarInfo && (
+                  <div
+                    data-testid="pinned-bar-card"
+                    style={{
+                      position: 'absolute',
+                      left: `${Math.min(Math.max(16, (pinnedBarInfo.x ?? 100)), (chartContainerRef.current?.clientWidth ?? 600) - 250)}px`,
+                      top: `${Math.min(Math.max(16, (pinnedBarInfo.y ?? 100)), 220)}px`,
+                      backgroundColor: 'rgba(20, 20, 26, 0.96)',
+                      backdropFilter: 'blur(20px)',
+                      WebkitBackdropFilter: 'blur(20px)',
+                      border: '1px solid rgba(10, 132, 255, 0.55)',
+                      borderRadius: '12px',
+                      padding: '12px 16px',
+                      boxShadow: '0 16px 40px rgba(0, 0, 0, 0.85)',
+                      zIndex: 45,
+                      minWidth: '220px',
+                      color: '#ffffff',
+                      fontSize: '12px',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px', marginBottom: '8px' }}>
+                      <span style={{ fontWeight: 800, color: '#0a84ff', fontSize: '11.5px', letterSpacing: '0.4px' }}>
+                        📌 BAR INSPECTION
+                      </span>
+                      <button
+                        onClick={() => setPinnedBarInfo(null)}
+                        style={{ background: 'none', border: 'none', color: '#8e8e93', cursor: 'pointer', fontSize: '12px', padding: 0 }}
+                        title="Close"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div style={{ color: '#8e8e93', fontSize: '11px', marginBottom: '6px' }}>
+                      📅 {pinnedBarInfo.dateStr} {pinnedBarInfo.timeStr}
+                    </div>
+                    {pinnedBarInfo.open !== undefined ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '6px' }}>
+                        <div><span style={{ color: '#8e8e93' }}>Open:</span> <strong>${pinnedBarInfo.open.toFixed(2)}</strong></div>
+                        <div><span style={{ color: '#8e8e93' }}>High:</span> <strong>${pinnedBarInfo.high?.toFixed(2)}</strong></div>
+                        <div><span style={{ color: '#8e8e93' }}>Low:</span> <strong>${pinnedBarInfo.low?.toFixed(2)}</strong></div>
+                        <div><span style={{ color: '#8e8e93' }}>Close:</span> <strong>${pinnedBarInfo.close.toFixed(2)}</strong></div>
+                      </div>
+                    ) : (
+                      <div style={{ marginBottom: '6px' }}>
+                        <span style={{ color: '#8e8e93' }}>Price:</span> <strong>${pinnedBarInfo.close.toFixed(2)}</strong>
+                      </div>
+                    )}
+                    {pinnedBarInfo.change !== undefined && (
+                      <div style={{ marginBottom: '6px', fontWeight: 600, color: (pinnedBarInfo.change >= 0 ? '#30d158' : '#ff453a') }}>
+                        <span>Change: </span>
+                        <span>{pinnedBarInfo.change >= 0 ? '▲ +' : '▼ -'}${Math.abs(pinnedBarInfo.change).toFixed(2)} ({pinnedBarInfo.change >= 0 ? '+' : ''}{pinnedBarInfo.percent?.toFixed(2)}%)</span>
+                      </div>
+                    )}
+                    {pinnedBarInfo.volume !== undefined && (
+                      <div style={{ marginBottom: '6px' }}>
+                        <span style={{ color: '#8e8e93' }}>Volume: </span>
+                        <strong style={{ color: '#30d158' }}>{formatCompactNumber(pinnedBarInfo.volume)} shares</strong>
+                      </div>
+                    )}
+                    {(pinnedBarInfo.ema9 != null || pinnedBarInfo.dif != null) && (
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '6px', marginTop: '6px', fontSize: '11px' }}>
+                        {pinnedBarInfo.ema9 != null && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#00e5ff' }}>
+                            <span>EMA 9: ${pinnedBarInfo.ema9.toFixed(2)}</span>
+                            <span style={{ color: '#ff9f0a' }}>EMA 21: {pinnedBarInfo.ema21 != null ? `$${pinnedBarInfo.ema21.toFixed(2)}` : '--'}</span>
+                          </div>
+                        )}
+                        {pinnedBarInfo.dif != null && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                            <span style={{ color: '#00e5ff' }}>DIF: {pinnedBarInfo.dif.toFixed(2)}</span>
+                            <span style={{ color: '#ff9f0a' }}>DEA: {pinnedBarInfo.dea != null ? pinnedBarInfo.dea.toFixed(2) : '--'}</span>
+                            <span style={{ color: (pinnedBarInfo.hist ?? 0) >= 0 ? '#30d158' : '#ff453a' }}>
+                              HIST: {pinnedBarInfo.hist != null ? `${(pinnedBarInfo.hist >= 0 ? '+' : '')}${pinnedBarInfo.hist.toFixed(2)}` : '--'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+
                 {showTradeMarkers && shieldMarkers.map(sm => {
                   const isBuy = sm.action === 'BUY';
                   const isHovered = (hoveredShieldId === sm.id) || (pinnedShieldId === sm.id);
@@ -2976,6 +3359,7 @@ export default function App() {
                               boxShadow: '0 10px 36px rgba(0, 0, 0, 0.8)',
                               whiteSpace: 'nowrap',
                               pointerEvents: 'none',
+
                               zIndex: 40,
                               display: 'flex',
                               flexDirection: 'column',

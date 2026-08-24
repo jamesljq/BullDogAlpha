@@ -2,7 +2,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import App, { calculateRSI, calculateSMA, calculateEMA, calculateMACD, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
+import App, { calculateRSI, calculateSMA, calculateEMA, calculateMACD, formatCompactNumber, getStockStats, checkIsMarketClosed, getMarketSessionStatus, STOCK_NAMES, aggregateTradeMarkers, TradeMarker, checkIsDailyOrHigher, getMarketSessionPrices, checkIsEarlyCloseDay, getIntervalSeconds, getTodayStats, filterTimeframeBars, getSmartPopoverPosition, filterVisibleShieldMarkers, CHART_PRICE_SCALE_WIDTH_PX } from './App';
+
+
 
 const mockFitContent = jest.fn();
 const mockRemoveChart = jest.fn();
@@ -2040,5 +2042,92 @@ describe('Bulldog Alpha Web Console', () => {
       expect(screen.getByText('+$1485.00')).toBeInTheDocument();
     });
   });
+
+  describe('Indicator Guide Tooltip & Crosshair Legend Suite', () => {
+    test('formatCompactNumber correctly formats thousands, millions, and billions', () => {
+      expect(formatCompactNumber(500)).toBe('500');
+      expect(formatCompactNumber(1500)).toBe('1.5K');
+      expect(formatCompactNumber(494830)).toBe('494.8K');
+      expect(formatCompactNumber(1250000)).toBe('1.25M');
+      expect(formatCompactNumber(3500000000)).toBe('3.50B');
+      expect(formatCompactNumber(NaN)).toBe('--');
+    });
+
+    test('IndicatorGuideTooltip renders (?) buttons for Volume, EMA, and MACD in Trading Terminal toolbar', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.getByTestId('indicator-guide-btn-volume')).toBeInTheDocument();
+      expect(screen.getByTestId('indicator-guide-btn-ema')).toBeInTheDocument();
+      expect(screen.getByTestId('indicator-guide-btn-macd')).toBeInTheDocument();
+    });
+
+    test('IndicatorGuideTooltip hover & click-to-pin renders bilingual philosophy, mechanics, and desired ranges', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const volGuideBtn = screen.getByTestId('indicator-guide-btn-volume');
+
+      // Click to pin Volume Guide
+      await act(async () => {
+        fireEvent.click(volGuideBtn);
+      });
+
+      expect(screen.getByTestId('indicator-guide-popover-volume')).toBeInTheDocument();
+      expect(screen.getByText('Trading Volume (成交量)')).toBeInTheDocument();
+      expect(screen.getByText(/Institutional Market Liquidity & Order Flow Velocity/i)).toBeInTheDocument();
+
+      // Check English first, Chinese second in philosophy
+      expect(screen.getByText(/Volume represents the total number of shares transacted/i)).toBeInTheDocument();
+      expect(screen.getByText(/成交量代表在选定时间周期内撮合成交的总股数/i)).toBeInTheDocument();
+
+      // Check Mechanics & Ranges
+      expect(screen.getByText(/Breakout Volume Ratio: > 2.0x/i)).toBeInTheDocument();
+      expect(screen.getByText(/有效突破放量区间：成交量 > 20周期均量的2.0倍以上/i)).toBeInTheDocument();
+
+      // Close pinned popover
+      const closeBtn = screen.getByTitle('Unpin / Close');
+      await act(async () => {
+        fireEvent.click(closeBtn);
+      });
+      expect(screen.queryByTestId('indicator-guide-popover-volume')).not.toBeInTheDocument();
+    });
+
+    test('MACD IndicatorGuideTooltip renders DIF, DEA, and Histogram formulas and institutional signals', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const macdGuideBtn = screen.getByTestId('indicator-guide-btn-macd');
+      await act(async () => {
+        fireEvent.click(macdGuideBtn);
+      });
+
+      expect(screen.getByTestId('indicator-guide-popover-macd')).toBeInTheDocument();
+      expect(screen.getByText(/MACD \(12, 26, 9\) - Oscillator Momentum/i)).toBeInTheDocument();
+      expect(screen.getByText(/DIF = EMA\(12\) - EMA\(26\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Zero Line Cross \(DIF > 0\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/0 轴多空分水岭/i)).toBeInTheDocument();
+    });
+
+    test('Crosshair Legend Ribbon renders above chart with real-time stats and indicators', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const legendRibbon = screen.getByTestId('crosshair-legend-ribbon');
+      expect(legendRibbon).toBeInTheDocument();
+      expect(legendRibbon).toHaveTextContent(/O:/i);
+      expect(legendRibbon).toHaveTextContent(/C:/i);
+      expect(legendRibbon).toHaveTextContent(/Vol:/i);
+      expect(legendRibbon).toHaveTextContent(/EMA\(9\):/i);
+      expect(legendRibbon).toHaveTextContent(/DIF:/i);
+      expect(legendRibbon).toHaveTextContent(/DEA:/i);
+      expect(legendRibbon).toHaveTextContent(/HIST:/i);
+    });
+  });
 });
+
 
