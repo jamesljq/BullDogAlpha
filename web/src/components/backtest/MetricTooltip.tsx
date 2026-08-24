@@ -148,18 +148,48 @@ interface MetricTooltipProps {
   size?: number;
 }
 
-export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 14 }) => {
+export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 16 }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const info = METRIC_DICTIONARY[metricKey];
+
+  // Outside click listener to dismiss pinned tooltip
+  React.useEffect(() => {
+    if (!isPinned) return;
+
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsPinned(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [isPinned]);
 
   if (!info) return null;
 
+  const isOpen = isPinned || isHovered;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsPinned((prev) => !prev);
+  };
+
   return (
     <div
-      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', marginLeft: '6px', cursor: 'help' }}
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', marginLeft: '6px', cursor: 'pointer' }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={handleClick}
       data-testid={`metric-tooltip-${metricKey}`}
+      title={isPinned ? '点击任意空白处关闭' : '点击固定卡片 / 悬停预览'}
     >
       <span
         style={{
@@ -169,10 +199,12 @@ export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 
           width: `${size}px`,
           height: `${size}px`,
           borderRadius: '50%',
-          backgroundColor: isHovered ? '#0a84ff' : 'rgba(255, 255, 255, 0.15)',
-          color: isHovered ? '#ffffff' : '#8e8e93',
-          fontSize: '10px',
-          fontWeight: 700,
+          backgroundColor: isPinned ? '#0a84ff' : isHovered ? 'rgba(10, 132, 255, 0.8)' : 'rgba(255, 255, 255, 0.18)',
+          color: isPinned || isHovered ? '#ffffff' : '#a1a1aa',
+          fontSize: '11px',
+          fontWeight: 800,
+          boxShadow: isPinned ? '0 0 10px rgba(10, 132, 255, 0.7)' : 'none',
+          border: isPinned ? '1px solid #64d2ff' : '1px solid rgba(255, 255, 255, 0.1)',
           transition: 'all 0.15s ease',
           userSelect: 'none',
         }}
@@ -180,58 +212,101 @@ export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 
         ?
       </span>
 
-      {isHovered && (
+      {isOpen && (
         <div
           style={{
             position: 'absolute',
-            bottom: '125%',
+            bottom: '130%',
             left: '50%',
             transform: 'translateX(-50%)',
             backgroundColor: '#181a24',
-            border: '1px solid rgba(255, 255, 255, 0.18)',
-            borderRadius: '8px',
-            padding: '12px 14px',
-            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.75)',
+            border: isPinned ? '1px solid #0a84ff' : '1px solid rgba(255, 255, 255, 0.22)',
+            borderRadius: '10px',
+            padding: '14px 16px',
+            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.85)',
             zIndex: 9999,
-            width: '260px',
-            pointerEvents: 'none',
-            backdropFilter: 'blur(16px)',
+            width: '310px',
+            backdropFilter: 'blur(20px)',
+            pointerEvents: 'auto',
           }}
+          onClick={(e) => e.stopPropagation()}
           data-testid={`tooltip-popover-${metricKey}`}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#ffffff' }}>{info.title}</span>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.2px' }}>
+              {info.title}
+            </span>
             <span
               style={{
-                fontSize: '10px',
-                fontWeight: 600,
+                fontSize: '11px',
+                fontWeight: 700,
                 color: info.direction === 'higher' ? '#30d158' : '#64d2ff',
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                padding: '2px 6px',
-                borderRadius: '4px',
+                backgroundColor: 'rgba(255, 255, 255, 0.09)',
+                padding: '3px 8px',
+                borderRadius: '5px',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
               {info.directionText}
             </span>
           </div>
 
-          <p style={{ fontSize: '11px', color: '#aeaeb2', margin: '0 0 8px 0', lineHeight: 1.4 }}>
+          {/* Definition */}
+          <p style={{ fontSize: '12.5px', color: '#e5e5ea', margin: '0 0 10px 0', lineHeight: 1.5, fontWeight: 400 }}>
             {info.definition}
           </p>
 
-          <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '6px' }}>
-            <div style={{ fontSize: '10px', fontWeight: 700, color: '#8e8e93', marginBottom: '4px', textTransform: 'uppercase' }}>
+          {/* Benchmarks List */}
+          <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 800, color: '#9ca3af', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
               Reference Benchmarks (参考基准):
             </div>
             {info.benchmarks.map((b, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
-                <span style={{ color: b.color, fontWeight: 600 }}>• {b.label}</span>
-                <span style={{ color: '#d1d1d6', fontFamily: 'monospace' }}>{b.range}</span>
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '12px',
+                  marginBottom: '4px',
+                  padding: '2px 0',
+                }}
+              >
+                <span style={{ color: b.color, fontWeight: 700 }}>• {b.label}</span>
+                <span style={{ color: '#f3f4f6', fontFamily: 'monospace', fontWeight: 600, fontSize: '12px' }}>
+                  {b.range}
+                </span>
               </div>
             ))}
+          </div>
+
+          {/* Footer Pin Hint */}
+          <div style={{ marginTop: '10px', paddingTop: '6px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '10.5px', color: isPinned ? '#64d2ff' : '#71717a' }}>
+              {isPinned ? '📌 已固定卡片 (点击页面空白处关闭)' : '💡 点击可固定显示'}
+            </span>
+            {isPinned && (
+              <button
+                type="button"
+                onClick={() => setIsPinned(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#9ca3af',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  padding: '2px 6px',
+                }}
+              >
+                关闭 ✕
+              </button>
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
+

@@ -1748,6 +1748,37 @@ describe('Bulldog Alpha Web Console', () => {
       expect(screen.queryByTestId('tooltip-popover-sharpe')).not.toBeInTheDocument();
     });
 
+    test('Metric Tooltip click pins popover, persists on mouse leave, and dismisses on outside click', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('metric-tooltip-cagr')).toBeInTheDocument();
+      });
+
+      const cagrTooltip = screen.getByTestId('metric-tooltip-cagr');
+
+      // 1. Click to pin tooltip
+      fireEvent.click(cagrTooltip);
+      expect(screen.getByTestId('tooltip-popover-cagr')).toBeInTheDocument();
+      expect(screen.getByText(/已固定卡片/i)).toBeInTheDocument();
+
+      // 2. Mouse leave should NOT dismiss because it is pinned
+      fireEvent.mouseLeave(cagrTooltip);
+      expect(screen.getByTestId('tooltip-popover-cagr')).toBeInTheDocument();
+
+      // 3. Click outside on document body dismisses the pinned tooltip
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByTestId('tooltip-popover-cagr')).not.toBeInTheDocument();
+    });
+
+
     test('Control Panel modifies strategy, symbol basket and fast presets', async () => {
       await act(async () => {
         render(<App />);
