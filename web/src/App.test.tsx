@@ -2136,6 +2136,24 @@ describe('Bulldog Alpha Web Console', () => {
       expect(fullBars[3].time).toBe(101);
     });
 
+    test('calculateSMA gracefully computes progressive expanding SMA when progressive=true and points < period', () => {
+      const bars = [
+        { time: 1, value: 10 },
+        { time: 2, value: 20 },
+        { time: 3, value: 30 },
+      ];
+      // strict mode returns empty because 3 < 50
+      expect(calculateSMA(bars, 50, false).length).toBe(0);
+
+      // progressive mode (used in chart view and ribbon) returns expanding SMA
+      const sma = calculateSMA(bars, 50, true);
+      expect(sma.length).toBe(3);
+      expect(sma[0].value).toBe(10); // 10 / 1
+      expect(sma[1].value).toBe(15); // (10 + 20) / 2
+      expect(sma[2].value).toBe(20); // (10 + 20 + 30) / 3
+    });
+
+
     test('Crosshair Legend Ribbon renders above chart with real-time stats and indicators', async () => {
       (global as any).fetch = jest.fn().mockImplementation((url: string) => {
         if (url.includes('/api/mdg/config')) {

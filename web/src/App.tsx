@@ -6,9 +6,11 @@ import { IndicatorGuideTooltip } from './components/terminal/IndicatorGuideToolt
 
 export const calculateSMA = (
   data: { time: number; value: number }[],
-  period: number
+  period: number,
+  progressive = false
 ): { time: number; value: number }[] => {
-  if (!data || data.length < period || period <= 0) return [];
+  if (!data || data.length === 0 || period <= 0) return [];
+  if (!progressive && data.length < period) return [];
   const result: { time: number; value: number }[] = [];
   let sum = 0;
   for (let i = 0; i < data.length; i++) {
@@ -21,10 +23,17 @@ export const calculateSMA = (
         time: data[i].time,
         value: Number((sum / period).toFixed(2)),
       });
+    } else if (progressive) {
+      // Progressive expanding SMA for early bars before lookback reaches full period (e.g. 1D/1W intraday)
+      result.push({
+        time: data[i].time,
+        value: Number((sum / (i + 1)).toFixed(2)),
+      });
     }
   }
   return result;
 };
+
 
 export const calculateEMA = (
   data: { time: number; value: number }[],
@@ -1220,7 +1229,7 @@ export default function App() {
     if (fullBars.length > 0) {
       const ema9List = calculateEMA(fullBars, 9);
       const ema21List = calculateEMA(fullBars, 21);
-      const sma50List = calculateSMA(fullBars, 50);
+      const sma50List = calculateSMA(fullBars, 50, true);
       const macdRes = calculateMACD(fullBars);
 
       const matchedTime = candleIdx >= 0 ? candles[candleIdx].time : timeSec;
@@ -2426,7 +2435,7 @@ export default function App() {
           ema21SeriesRef.current.setData(ema21Data);
           sma50SeriesRef.current.setData([]);
         } else if (showMa === "sma" && fullPriceBarsForCalc.length > 0) {
-          const sma50Data = calculateSMA(fullPriceBarsForCalc, 50).filter(d => currentTimes.has(d.time));
+          const sma50Data = calculateSMA(fullPriceBarsForCalc, 50, true).filter(d => currentTimes.has(d.time));
           ema9SeriesRef.current.setData([]);
           ema21SeriesRef.current.setData([]);
           sma50SeriesRef.current.setData(sma50Data);
