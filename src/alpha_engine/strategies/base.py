@@ -1,7 +1,26 @@
 """Base classes and interfaces for trading strategies and portfolio management."""
 
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
+
+
+
+@dataclass(frozen=True)
+class StrategyMetadata:
+  """Institutional metadata and explainability definition for a trading strategy."""
+  id: str
+  name: str
+  category: str
+  philosophy: str
+  mechanics: str
+  suitable_regime: str
+  risk_profile: str
+  default_params: Dict[str, Any]
+  param_descriptions: Dict[str, str]
+
+  def to_dict(self) -> Dict[str, Any]:
+    return asdict(self)
 
 
 class StrategyContext(ABC):
@@ -51,6 +70,21 @@ class BaseStrategy(ABC):
   def __init__(self, ctx: StrategyContext):
     self.ctx = ctx
 
+  @classmethod
+  def get_metadata(cls) -> StrategyMetadata:
+    """Returns granular explainability metadata, thesis, mechanics, and suitable regimes."""
+    return StrategyMetadata(
+        id="base_strategy",
+        name="Base Alpha Strategy",
+        category="General",
+        philosophy="General market execution baseline.",
+        mechanics="Processes synchronized bar events and manages inventory positions.",
+        suitable_regime="All market conditions.",
+        risk_profile="Subject to underlying asset market volatility.",
+        default_params={},
+        param_descriptions={},
+    )
+
   @abstractmethod
   def on_bar(self, bar: Any) -> None:
     """Callback invoked when a new synchronized bar or set of bars is received."""
@@ -60,6 +94,7 @@ class BaseStrategy(ABC):
   def on_order_status(self, order_response: Any) -> None:
     """Callback invoked when order status changes."""
     pass
+
 
 
 class SubPortfolio:

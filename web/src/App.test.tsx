@@ -1779,10 +1779,46 @@ describe('Bulldog Alpha Web Console', () => {
     });
 
 
+    test('Strategy explainability breakdown renders quantitative philosophy, mechanics, regime, and parameter guides and collapses on click', async () => {
+      await act(async () => {
+        render(<App />);
+      });
+
+      const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
+      await act(async () => {
+        fireEvent.click(backtestTabBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('strategy-explainability-card')).toBeInTheDocument();
+      });
+
+      // Verify header, category badge and key breakdown sections
+      expect(screen.getAllByText(/Dual EMA Momentum Trend Follower/i).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('Trend Following')).toBeInTheDocument();
+      expect(screen.getByText(/量化核心思路 \(Philosophy\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/执行机制与风控 \(Mechanics\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/最佳适用行情 \(Suitable Regime\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/潜在风险与失效场景 \(Risk Profile\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/策略可调参数指南/i)).toBeInTheDocument();
+
+
+      // Test collapse / expand toggle
+      const collapseBtn = screen.getByText('收起 ▲');
+      fireEvent.click(collapseBtn);
+      expect(screen.queryByText(/量化核心思路 \(Philosophy\)/i)).not.toBeInTheDocument();
+      expect(screen.getByText('展开详情 ▼')).toBeInTheDocument();
+
+      // Click to re-expand
+      fireEvent.click(screen.getByText('展开详情 ▼'));
+      expect(screen.getByText(/量化核心思路 \(Philosophy\)/i)).toBeInTheDocument();
+    });
+
     test('Control Panel modifies strategy, symbol basket and fast presets', async () => {
       await act(async () => {
         render(<App />);
       });
+
 
       const backtestTabBtn = screen.getByTestId('tab-backtest-btn');
       await act(async () => {

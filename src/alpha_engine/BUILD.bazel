@@ -148,6 +148,16 @@ py_test(
     ],
 )
 
+py_test(
+    name = "strategy_metadata_test",
+    srcs = ["strategy_metadata_test.py"],
+    deps = [
+        ":base",
+        ":strategies",
+    ],
+)
+
+
 
 
 

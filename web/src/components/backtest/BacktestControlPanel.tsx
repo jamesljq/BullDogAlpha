@@ -186,6 +186,8 @@ export const BacktestControlPanel: React.FC<BacktestControlPanelProps> = ({
         >
           <option value="trend">Dual EMA Momentum Trend Follower</option>
           <option value="mean_reversion">Bollinger & RSI Mean Reversion</option>
+          <option value="stat_arb">Cointegrated Pairs Statistical Arbitrage</option>
+          <option value="momentum">Cross-Sectional Factor Momentum</option>
           <option value="multi_asset_limit">Multi-Asset Spread Liquidity Maker</option>
           <option value="rl_strategy">Deep RL Microstructure Policy</option>
         </select>

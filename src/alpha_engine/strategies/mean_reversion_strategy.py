@@ -3,19 +3,35 @@
 from collections import deque
 import math
 from typing import Any, Dict, List, Optional
-from src.alpha_engine.strategies.base import BaseStrategy, StrategyContext
+from src.alpha_engine.strategies.base import BaseStrategy, StrategyContext, StrategyMetadata
+
 
 
 class MeanReversionStrategy(BaseStrategy):
-  """Mean reversion strategy exploiting statistical price overextension.
+  """Mean reversion strategy exploiting statistical price overextension."""
 
-  Uses a combination of:
-  - 20-period Bollinger Bands (Upper, Middle, Lower).
-  - 14-period RSI (Relative Strength Index).
-  - Dynamic ATR-based risk stop loss.
-  """
+  @classmethod
+  def get_metadata(cls) -> StrategyMetadata:
+    return StrategyMetadata(
+        id="mean_reversion",
+        name="Bollinger & RSI Mean Reversion",
+        category="Mean Reversion",
+        philosophy="价格围绕内在公允均值波动，短期的恐慌性超卖或贪婪性超买属于非理性过度反应，必然在统计规律下向移动平均线回归。",
+        mechanics="价格跌穿布林带下轨且 RSI < 30 时左侧建多仓；冲破布林带上轨且 RSI > 70 时建空仓或平多仓；价格回归至中轨 SMA 时平仓锁定利润。",
+        suitable_regime="均值回归型震荡市、宽幅箱体整理行情、波动率收敛区间。",
+        risk_profile="在遭遇极端黑天鹅或强单边暴跌行情时，可能出现“越跌越买/扛单破止损”风险，需严格设定 ATR 止损保护。",
+        default_params={"window": 20, "num_std": 2.0, "rsi_period": 14, "rsi_oversold": 30.0, "rsi_overbought": 70.0},
+        param_descriptions={
+            "window": "布林带移动平均基准周期，通常设置为 20 日",
+            "num_std": "标准差倍数通道宽度，2.0 对应 95.4% 的正态置信区间",
+            "rsi_period": "相对强弱指标 RSI 统计周期",
+            "rsi_oversold": "超卖阈值线（低于该值视为情绪恐慌超跌）",
+            "rsi_overbought": "超买阈值线（高于该值视为情绪亢奋过热）",
+        },
+    )
 
   def __init__(
+
       self,
       ctx: StrategyContext,
       symbol: str,

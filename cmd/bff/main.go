@@ -1809,11 +1809,16 @@ func calculateEaster(year int) (int, int) {
 }
 
 type BacktestStrategyMeta struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Description   string                 `json:"description"`
-	Category      string                 `json:"category"`
-	DefaultParams map[string]interface{} `json:"default_params"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description"`
+	Category          string                 `json:"category"`
+	Philosophy        string                 `json:"philosophy"`
+	Mechanics         string                 `json:"mechanics"`
+	SuitableRegime    string                 `json:"suitable_regime"`
+	RiskProfile       string                 `json:"risk_profile"`
+	DefaultParams     map[string]interface{} `json:"default_params"`
+	ParamDescriptions map[string]string      `json:"param_descriptions"`
 }
 
 type BacktestRequest struct {
@@ -1896,70 +1901,125 @@ func (b *BFFServer) HandleBacktestStrategiesAPI(w http.ResponseWriter, r *http.R
 
 	strategies := []BacktestStrategyMeta{
 		{
-			ID:          "trend",
-			Name:        "Dual EMA Momentum Trend Follower",
-			Description: "Captures medium-term cross-asset momentum trends using dynamic exponential moving average crossovers with adaptive ATR volatility trailing stops.",
-			Category:    "Trend Following",
+			ID:             "trend",
+			Name:           "Dual EMA Momentum Trend Follower",
+			Description:    "Captures medium-term cross-asset momentum trends using dynamic exponential moving average crossovers with adaptive ATR volatility trailing stops.",
+			Category:       "Trend Following",
+			Philosophy:     "价格呈现序列自相关性与动量聚集效应。通过顺应中期均线趋势并让利润奔跑，捕捉资产价格的大级别单边运动波段。",
+			Mechanics:      "当快速均线金叉慢速均线时全仓做多；快线死叉慢线时平仓或反手做空，结合 ATR 波动率自适应追踪止损控制单笔最大回撤。",
+			SuitableRegime: "单边上升牛市、大级别突破行情、高动量波动扩张周期。",
+			RiskProfile:    "在窄幅横盘无趋势震荡市容易反复遭遇“双重打脸”（Whipsaw）导致连续小幅止损磨损本金。",
 			DefaultParams: map[string]interface{}{
-				"fast_period": 12,
-				"slow_period": 26,
+				"fast_period": 10,
+				"slow_period": 30,
 				"atr_mult":    2.5,
 			},
-		},
-		{
-			ID:          "mean_reversion",
-			Name:        "Bollinger & RSI Mean Reversion",
-			Description: "Exploits short-term statistically oversold/overbought price deviations using 20-period standard deviation bands and RSI exhaustion.",
-			Category:    "Mean Reversion",
-			DefaultParams: map[string]interface{}{
-				"window":  20,
-				"num_std": 2.0,
-				"rsi_len": 14,
+			ParamDescriptions: map[string]string{
+				"fast_period": "短期均线周期（天数），对最新价格变动更敏感",
+				"slow_period": "长期基准均线周期，用于过滤短期市场噪音",
+				"atr_mult":    "真实波幅 ATR 倍数，动态决定追踪止损缓冲带",
 			},
 		},
 		{
-			ID:          "stat_arb",
-			Name:        "Cointegrated Pairs Statistical Arbitrage",
-			Description: "Exploits cointegrated mean-reverting equity pairs with dynamic OLS hedge ratio and Z-score spread boundaries.",
-			Category:    "Statistical Arbitrage",
+			ID:             "mean_reversion",
+			Name:           "Bollinger & RSI Mean Reversion",
+			Description:    "Exploits short-term statistically oversold/overbought price deviations using 20-period standard deviation bands and RSI exhaustion.",
+			Category:       "Mean Reversion",
+			Philosophy:     "价格围绕内在公允均值波动，短期的恐慌性超卖或贪婪性超买属于非理性过度反应，必然在统计规律下向移动平均线回归。",
+			Mechanics:      "价格跌穿布林带下轨且 RSI < 30 时左侧建多仓；冲破布林带上轨且 RSI > 70 时建空仓或平多仓；价格回归至中轨 SMA 时平仓锁定利润。",
+			SuitableRegime: "均值回归型震荡市、宽幅箱体整理行情、波动率收敛区间。",
+			RiskProfile:    "在遭遇极端黑天鹅或强单边暴跌行情时，可能出现“越跌越买/扛单破止损”风险，需严格设定 ATR 止损保护。",
+			DefaultParams: map[string]interface{}{
+				"window":   20,
+				"num_std":  2.0,
+				"rsi_len":  14,
+				"rsi_over": 30.0,
+			},
+			ParamDescriptions: map[string]string{
+				"window":   "布林带移动平均基准周期，通常为 20 日",
+				"num_std":  "标准差倍数通道宽度，2.0 对应 95.4% 正态置信区间",
+				"rsi_len":  "相对强弱指标 RSI 统计周期",
+				"rsi_over": "超卖阈值线（低于该值视为情绪恐慌超跌）",
+			},
+		},
+		{
+			ID:             "stat_arb",
+			Name:           "Cointegrated Pairs Statistical Arbitrage",
+			Description:    "Exploits cointegrated mean-reverting equity pairs with dynamic OLS hedge ratio and Z-score spread boundaries.",
+			Category:       "Statistical Arbitrage",
+			Philosophy:     "具有共同经济驱动因子的高关联资产对（如 MSFT vs AAPL）具有长期协整关系，短期价差偏离会向统计均衡中枢靠拢。",
+			Mechanics:      "通过滚动 OLS 回归实时计算动态对冲比率 Beta，构建平稳价差序列。当 Z-Score <= -2.0 时做多价差（买A卖B）；Z-Score >= 2.0 时做空价差（卖A买B）；回归至 0 轴时平仓，偏离 > 3.5 触发结构性断裂硬止损。",
+			SuitableRegime: "市场中性环境、两融配对对冲、大盘剧烈震荡但板块内部相对稳定的阶段。",
+			RiskProfile:    "协整关系可能因为企业基本面突变（如重大财报暴雷、并购重组）而彻底瓦解（Structural Break）。",
 			DefaultParams: map[string]interface{}{
 				"window":  30,
 				"entry_z": 2.0,
 				"exit_z":  0.5,
 				"stop_z":  3.5,
 			},
+			ParamDescriptions: map[string]string{
+				"window":  "协整对冲系数 Beta 与价差均值/方差的滚动计算窗口长度",
+				"entry_z": "建仓开仓的 Z-score 标准差偏离阈值（通常为 1.5 ~ 2.5）",
+				"exit_z":  "均值回归目标平仓阈值（接近 0.0 时平仓止盈）",
+				"stop_z":  "极端脱节硬止损阈值（防止单边脱节导致无限亏损）",
+			},
 		},
 		{
-			ID:          "momentum",
-			Name:        "Cross-Sectional Multi-Asset Factor Momentum",
-			Description: "Periodically ranks multi-asset universe by trailing returns, allocating to top winners with inverse-volatility parity sizing.",
-			Category:    "Factor Momentum",
+			ID:             "momentum",
+			Name:           "Cross-Sectional Multi-Asset Factor Momentum",
+			Description:    "Periodically ranks multi-asset universe by trailing returns, allocating to top winners with inverse-volatility parity sizing.",
+			Category:       "Factor Momentum",
+			Philosophy:     "截面多资产动量效应（Jegadeesh & Titman 经典理论）：在资产池内部，过去表现最强的资产（Winners）在未来一段周期内会继续跑赢表现最差的资产（Losers）。",
+			Mechanics:      "每隔 N 个周期对资产池全量标的按过去 Lookback 周期累积收益打分排序，按反波动率风险平价权重做多 Top 领头羊，做空/减持 Bottom 滞涨股。",
+			SuitableRegime: "板块轮动加速行情、结构性分化牛市、科技成长龙头主升浪。",
+			RiskProfile:    "在遭遇市场风格剧烈切换（如高低切换、价值防御突发跑赢成长动量）时，可能发生“动量崩溃（Momentum Crash）”。",
 			DefaultParams: map[string]interface{}{
 				"lookback":           20,
 				"top_k":              2,
 				"rebalance_interval": 5,
 			},
+			ParamDescriptions: map[string]string{
+				"lookback":           "动量回溯收益率统计周期（天数）",
+				"top_k":              "多头组合选取的头部最强资产数量",
+				"rebalance_interval": "组合再平衡调仓频率（K线根数）",
+			},
 		},
 		{
-			ID:          "multi_asset_limit",
-			Name:        "Multi-Asset Spread Liquidity Maker",
-			Description: "Simultaneously provides liquidity on top correlated equity pairs with dynamic inventory balancing and asymmetric quoting.",
-			Category:    "Market Making",
+			ID:             "multi_asset_limit",
+			Name:           "Multi-Asset Spread Liquidity Maker",
+			Description:    "Simultaneously provides liquidity on top correlated equity pairs with dynamic inventory balancing and asymmetric quoting.",
+			Category:       "Market Making",
+			Philosophy:     "高流动性标的由于微观做市商存货管理与瞬时买卖不平衡存在买卖价差（Bid-Ask Spread），双向挂单可赚取微观流动性溢价。",
+			Mechanics:      "实时依据盘口价差与存货偏斜度（Avellaneda-Stoikov 模型）非对称向买一/卖一挂限价单，在持仓偏大时向对向倾斜报价以诱导平仓。",
+			SuitableRegime: "高成交量活跃市场、震荡微波市、流动性充裕无突发跳空阶段。",
+			RiskProfile:    "逆向选择风险（Adverse Selection）：被知情交易者（Informed Traders）巨量砸穿单边导致存货严重被动套牢。",
 			DefaultParams: map[string]interface{}{
 				"spread_bps":   15,
 				"max_position": 500,
 			},
+			ParamDescriptions: map[string]string{
+				"spread_bps":   "做市报价与公允中间价的基点偏离间距",
+				"max_position": "单标的允许被动累积的最大安全持仓阈值",
+			},
 		},
 		{
-			ID:          "rl_strategy",
-			Name:        "Deep RL Microstructure Policy",
-			Description: "Deep Reinforcement Learning agent policy using feature vector embedding (order flow imbalance, normalized returns, volume profile).",
-			Category:    "Machine Learning",
+			ID:             "rl_strategy",
+			Name:           "Deep RL Microstructure Policy",
+			Description:    "Deep Reinforcement Learning agent policy using feature vector embedding (order flow imbalance, normalized returns, volume profile).",
+			Category:       "Machine Learning",
+			Philosophy:     "市场微观结构包含非线性非高斯的潜空间特征。通过深度强化学习（PPO/DQN）直接学习从微观订单流状态到最优仓位权重的端到端映射策略。",
+			Mechanics:      "提取对数收益率、滚动均值/方差、Z-Score、当前归一化持仓与现金比例构成连续状态向量，通过 ONNX 神经网络实时推理输出目标仓位权重，经由动作适配器约束下单。",
+			SuitableRegime: "高频微观结构波动、订单流失衡突发事件、流动性快速变动的日内行情。",
+			RiskProfile:    "神经网络策略存在“黑盒/不可解释风险”以及在未见过的极端宏观突发事件下的模型过拟合（Overfitting）与分布漂移风险。",
 			DefaultParams: map[string]interface{}{
 				"confidence_threshold": 0.70,
 			},
+			ParamDescriptions: map[string]string{
+				"confidence_threshold": "模型输出动作置信度过滤门槛",
+			},
 		},
 	}
+
 
 
 	_ = json.NewEncoder(w).Encode(strategies)

@@ -3,20 +3,34 @@
 from collections import deque
 import math
 from typing import Any, Dict, List, Optional
-from src.alpha_engine.strategies.base import BaseStrategy, StrategyContext
+from src.alpha_engine.strategies.base import BaseStrategy, StrategyContext, StrategyMetadata
+
 
 
 class StatArbStrategy(BaseStrategy):
-  """Pairs Statistical Arbitrage strategy with rolling dynamic hedge ratio.
+  """Pairs Statistical Arbitrage strategy with rolling dynamic hedge ratio."""
 
-  Computes rolling OLS spread:
-    Spread = Price_A - (beta * Price_B)
-    Z-Score = (Spread - Mean_Spread) / Std_Spread
-
-  Executes mean-reverting pairs trades with risk stop loss protection.
-  """
+  @classmethod
+  def get_metadata(cls) -> StrategyMetadata:
+    return StrategyMetadata(
+        id="stat_arb",
+        name="Cointegrated Pairs Statistical Arbitrage",
+        category="Statistical Arbitrage",
+        philosophy="具有共同经济驱动因子的高关联资产对（如 MSFT vs AAPL）具有长期协整关系，短期价差偏离会向统计均衡中枢靠拢。",
+        mechanics="通过滚动 OLS 回归实时计算动态对冲比率 Beta，构建平稳价差序列。当 Z-Score <= -2.0 时做多价差（买A卖B）；Z-Score >= 2.0 时做空价差（卖A买B）；回归至 0 轴时获利平仓，偏离 > 3.5 触发结构性断裂硬止损。",
+        suitable_regime="市场中性环境、两融配对对冲、大盘剧烈震荡但板块内部相对稳定的阶段。",
+        risk_profile="协整关系可能因为企业基本面突变（如重大财报暴雷、并购重组）而彻底瓦解（Structural Break）。",
+        default_params={"window": 30, "entry_z": 2.0, "exit_z": 0.5, "stop_z": 3.5},
+        param_descriptions={
+            "window": "协整对冲系数 Beta 与价差均值/方差的滚动计算窗口长度",
+            "entry_z": "建仓开仓的 Z-score 标准差偏离阈值（通常为 1.5 ~ 2.5）",
+            "exit_z": "均值回归目标平仓阈值（接近 0.0 时平仓止盈）",
+            "stop_z": "极端脱节硬止损阈值（防止单边脱节导致无限亏损）",
+        },
+    )
 
   def __init__(
+
       self,
       ctx: StrategyContext,
       symbol_a: str,
