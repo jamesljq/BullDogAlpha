@@ -151,8 +151,38 @@ interface MetricTooltipProps {
 export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 16 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  const [popoverPlacement, setPopoverPlacement] = useState<{
+    vertical: 'top' | 'bottom';
+    horizontal: 'center' | 'left' | 'right';
+  }>({ vertical: 'bottom', horizontal: 'center' });
   const containerRef = React.useRef<HTMLDivElement>(null);
   const info = METRIC_DICTIONARY[metricKey];
+
+  const isOpen = isPinned || isHovered;
+
+  // Dynamic collision-aware positioning to keep tooltip 100% inside viewport
+  React.useEffect(() => {
+    if (!isOpen || !containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const POPOVER_HEIGHT = 280;
+    const POPOVER_WIDTH = 320;
+
+    // If space above is less than popover height + 20px, render below icon
+    const showBelow = rect.top < POPOVER_HEIGHT + 20;
+
+    let horiz: 'center' | 'left' | 'right' = 'center';
+    if (rect.left + POPOVER_WIDTH / 2 > (window.innerWidth || 1200) - 20) {
+      horiz = 'right';
+    } else if (rect.left - POPOVER_WIDTH / 2 < 20) {
+      horiz = 'left';
+    }
+
+    setPopoverPlacement({
+      vertical: showBelow ? 'bottom' : 'top',
+      horizontal: horiz,
+    });
+  }, [isOpen]);
 
   // Outside click listener to dismiss pinned tooltip
   React.useEffect(() => {
@@ -174,11 +204,37 @@ export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 
 
   if (!info) return null;
 
-  const isOpen = isPinned || isHovered;
-
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsPinned((prev) => !prev);
+  };
+
+  const getPlacementStyles = (): React.CSSProperties => {
+    const styles: React.CSSProperties = {};
+
+    if (popoverPlacement.vertical === 'bottom') {
+      styles.top = 'calc(100% + 10px)';
+      styles.bottom = 'auto';
+    } else {
+      styles.bottom = 'calc(100% + 10px)';
+      styles.top = 'auto';
+    }
+
+    if (popoverPlacement.horizontal === 'right') {
+      styles.right = '0';
+      styles.left = 'auto';
+      styles.transform = 'none';
+    } else if (popoverPlacement.horizontal === 'left') {
+      styles.left = '0';
+      styles.right = 'auto';
+      styles.transform = 'none';
+    } else {
+      styles.left = '50%';
+      styles.right = 'auto';
+      styles.transform = 'translateX(-50%)';
+    }
+
+    return styles;
   };
 
   return (
@@ -216,22 +272,22 @@ export const MetricTooltip: React.FC<MetricTooltipProps> = ({ metricKey, size = 
         <div
           style={{
             position: 'absolute',
-            bottom: '130%',
-            left: '50%',
-            transform: 'translateX(-50%)',
+            ...getPlacementStyles(),
             backgroundColor: '#181a24',
             border: isPinned ? '1px solid #0a84ff' : '1px solid rgba(255, 255, 255, 0.22)',
             borderRadius: '10px',
             padding: '14px 16px',
             boxShadow: '0 12px 36px rgba(0, 0, 0, 0.85)',
             zIndex: 9999,
-            width: '310px',
+            width: '320px',
+            maxWidth: 'calc(100vw - 32px)',
             backdropFilter: 'blur(20px)',
             pointerEvents: 'auto',
           }}
           onClick={(e) => e.stopPropagation()}
           data-testid={`tooltip-popover-${metricKey}`}
         >
+
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.2px' }}>
