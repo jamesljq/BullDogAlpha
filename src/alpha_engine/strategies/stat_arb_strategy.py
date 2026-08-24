@@ -16,18 +16,47 @@ class StatArbStrategy(BaseStrategy):
         id="stat_arb",
         name="Cointegrated Pairs Statistical Arbitrage",
         category="Statistical Arbitrage",
-        philosophy="具有共同经济驱动因子的高关联资产对（如 MSFT vs AAPL）具有长期协整关系，短期价差偏离会向统计均衡中枢靠拢。",
-        mechanics="通过滚动 OLS 回归实时计算动态对冲比率 Beta，构建平稳价差序列。当 Z-Score <= -2.0 时做多价差（买A卖B）；Z-Score >= 2.0 时做空价差（卖A买B）；回归至 0 轴时获利平仓，偏离 > 3.5 触发结构性断裂硬止损。",
-        suitable_regime="市场中性环境、两融配对对冲、大盘剧烈震荡但板块内部相对稳定的阶段。",
-        risk_profile="协整关系可能因为企业基本面突变（如重大财报暴雷、并购重组）而彻底瓦解（Structural Break）。",
+        philosophy_en="Economically interconnected asset pairs (e.g. MSFT vs AAPL) exhibit stationary long-term cointegration. Short-term spread discrepancies inevitably mean-revert toward statistical equilibrium.",
+        philosophy_zh="具有共同经济驱动因子的高关联资产对（如 MSFT vs AAPL）具有长期协整关系，短期价差偏离会向统计均衡中枢靠拢。",
+        mechanics_en="Computes rolling OLS hedge ratio Beta to construct stationary spread. Buys spread when Z-Score <= -2.0; shorts spread when Z-Score >= 2.0; exits on zero cross, with |Z| >= 3.5 hard stop.",
+        mechanics_zh="通过滚动 OLS 回归实时计算动态对冲比率 Beta 构建平稳价差。当 Z-Score <= -2.0 时做多价差；Z-Score >= 2.0 时做空价差；回归至 0 轴时平仓，偏离 > 3.5 触发结构性断裂硬止损。",
+        suitable_regime_en="Market-neutral environments, equity long/short hedging, and high sector-internal correlation regimes.",
+        suitable_regime_zh="市场中性环境、两融配对对冲、大盘剧烈震荡但板块内部相对稳定的阶段。",
+        risk_profile_en="Structural cointegration breakdown due to idiosyncratic fundamental events (e.g. earnings shocks, M&A restructuring).",
+        risk_profile_zh="协整关系可能因为企业基本面突变（如重大财报暴雷、并购重组）而彻底瓦解（Structural Break）。",
         default_params={"window": 30, "entry_z": 2.0, "exit_z": 0.5, "stop_z": 3.5},
-        param_descriptions={
-            "window": "协整对冲系数 Beta 与价差均值/方差的滚动计算窗口长度",
-            "entry_z": "建仓开仓的 Z-score 标准差偏离阈值（通常为 1.5 ~ 2.5）",
-            "exit_z": "均值回归目标平仓阈值（接近 0.0 时平仓止盈）",
-            "stop_z": "极端脱节硬止损阈值（防止单边脱节导致无限亏损）",
+        param_schemas={
+            "window": {
+                "name": "OLS Estimation Window",
+                "default_value": 30,
+                "valid_range": "[15, 120] bars",
+                "description_en": "Rolling lookback window for dynamic hedge ratio Beta and spread Z-score computation.",
+                "description_zh": "协整对冲系数 Beta 与价差均值/方差的滚动计算窗口长度。",
+            },
+            "entry_z": {
+                "name": "Entry Z-Score Threshold",
+                "default_value": 2.0,
+                "valid_range": "[1.0, 3.0]",
+                "description_en": "Statistical standard deviation threshold to trigger pairs divergence entry.",
+                "description_zh": "建仓开仓的 Z-score 标准差偏离阈值（通常为 1.5 ~ 2.5）。",
+            },
+            "exit_z": {
+                "name": "Mean-Reversion Exit Threshold",
+                "default_value": 0.5,
+                "valid_range": "[0.0, 1.0]",
+                "description_en": "Convergence threshold to close spread trade and lock in mean-reverting alpha.",
+                "description_zh": "均值回归目标平仓阈值（接近 0.0 时平仓止盈）。",
+            },
+            "stop_z": {
+                "name": "Structural Break Stop Loss",
+                "default_value": 3.5,
+                "valid_range": "[2.5, 6.0]",
+                "description_en": "Emergency exit threshold to truncate losses if pair permanently diverges.",
+                "description_zh": "极端脱节硬止损阈值（防止单边脱节导致无限亏损）。",
+            },
         },
     )
+
 
   def __init__(
 

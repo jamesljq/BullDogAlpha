@@ -14,17 +14,40 @@ class RLStrategy(BaseStrategy):
         id="rl_strategy",
         name="Deep RL Microstructure Policy",
         category="Machine Learning / RL",
-        philosophy="市场微观结构包含非线性非高斯的潜空间特征。通过深度强化学习（PPO/DQN）直接学习从微观订单流状态到最优仓位权重的端到端映射策略。",
-        mechanics="提取对数收益率、滚动均值/方差、Z-Score、当前归一化持仓与现金比例构成连续状态向量，通过 ONNX 神经网络实时推理输出目标仓位权重，经由动作适配器约束下单。",
-        suitable_regime="高频微观结构波动、订单流失衡突发事件、流动性快速变动的日内行情。",
-        risk_profile="神经网络策略存在“黑盒/不可解释风险”以及在未见过的极端宏观突发事件下的模型过拟合（Overfitting）与分布漂移风险。",
+        philosophy_en="Financial microstructure features exhibit nonlinear, non-Gaussian latent dynamics. Deep Reinforcement Learning (PPO/DQN) trains end-to-end continuous policies mapping order flow states directly into target asset allocations.",
+        philosophy_zh="市场微观结构包含非线性非高斯的潜空间特征。通过深度强化学习（PPO/DQN）直接学习从微观订单流状态到最优仓位权重的端到端映射策略。",
+        mechanics_en="Extracts log returns, rolling volatility, price Z-scores, normalized inventory, and cash ratio into state embeddings; an ONNX neural policy network infers target weights throttled by risk adapters.",
+        mechanics_zh="提取对数收益率、滚动均值/方差、Z-Score、当前归一化持仓与现金比例构成连续状态向量，通过 ONNX 神经网络实时推理输出目标仓位权重，经由动作适配器约束下单。",
+        suitable_regime_en="High-frequency order-flow imbalances, intraday volatility bursts, and rapid liquidity regime shifts.",
+        suitable_regime_zh="高频微观结构波动、订单流失衡突发事件、流动性快速变动的日内行情。",
+        risk_profile_en="Black-box interpretability risks, policy distribution shifts, and potential overfitting to historical training regimes during macro shocks.",
+        risk_profile_zh="神经网络策略存在“黑盒/不可解释风险”以及在未见过的极端宏观突发事件下的模型过拟合（Overfitting）与分布漂移风险。",
         default_params={"window_size": 20, "max_position": 1000, "confidence_threshold": 0.70},
-        param_descriptions={
-            "window_size": "微观特征提取器状态滑动窗口长度",
-            "max_position": "单标的最大持仓股数上限约束",
-            "confidence_threshold": "模型输出动作置信度过滤门槛",
+        param_schemas={
+            "window_size": {
+                "name": "State Window Size",
+                "default_value": 20,
+                "valid_range": "[10, 60] bars",
+                "description_en": "Rolling feature observation window for neural policy state extraction.",
+                "description_zh": "微观特征提取器状态滑动窗口长度。",
+            },
+            "max_position": {
+                "name": "Max Inventory Cap",
+                "default_value": 1000,
+                "valid_range": "[100, 10000] shares",
+                "description_en": "Strict safety cap on maximum allowable shares held per symbol.",
+                "description_zh": "单标的最大持仓股数上限约束。",
+            },
+            "confidence_threshold": {
+                "name": "Policy Confidence Threshold",
+                "default_value": 0.70,
+                "valid_range": "[0.50, 0.95]",
+                "description_en": "Minimum action probability cutoff required before order execution.",
+                "description_zh": "模型输出动作置信度过滤门槛。",
+            },
         },
     )
+
 
   def __init__(
       self,

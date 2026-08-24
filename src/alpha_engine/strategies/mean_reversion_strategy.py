@@ -16,19 +16,47 @@ class MeanReversionStrategy(BaseStrategy):
         id="mean_reversion",
         name="Bollinger & RSI Mean Reversion",
         category="Mean Reversion",
-        philosophy="价格围绕内在公允均值波动，短期的恐慌性超卖或贪婪性超买属于非理性过度反应，必然在统计规律下向移动平均线回归。",
-        mechanics="价格跌穿布林带下轨且 RSI < 30 时左侧建多仓；冲破布林带上轨且 RSI > 70 时建空仓或平多仓；价格回归至中轨 SMA 时平仓锁定利润。",
-        suitable_regime="均值回归型震荡市、宽幅箱体整理行情、波动率收敛区间。",
-        risk_profile="在遭遇极端黑天鹅或强单边暴跌行情时，可能出现“越跌越买/扛单破止损”风险，需严格设定 ATR 止损保护。",
+        philosophy_en="Asset prices oscillate around their statistical equilibrium intrinsic mean. Short-term extreme deviations driven by fear or greed represent transient overreactions that revert back to central moving averages.",
+        philosophy_zh="资产价格围绕内在公允均值波动，短期的恐慌性超卖或贪婪性超买属于非理性过度反应，必然在统计规律下向移动平均线回归。",
+        mechanics_en="Takes long positions when price drops below the Lower Bollinger Band and RSI < 30. Exits longs or shorts when price reaches the Upper Band and RSI > 70. Closes positions upon returning to the Middle SMA.",
+        mechanics_zh="价格跌穿布林带下轨且 RSI < 30 时左侧建多仓；冲破布林带上轨且 RSI > 70 时建空仓或平多仓；价格回归至中轨 SMA 时平仓锁定利润。",
+        suitable_regime_en="Mean-reverting rangebound markets, broad consolidation channels, and contracting volatility regimes.",
+        suitable_regime_zh="均值回归型震荡市、宽幅箱体整理行情、波动率收敛区间。",
+        risk_profile_en="Severe left-tail risk during strong unilateral breakdowns or structural crashes where prices continue plunging without reversion.",
+        risk_profile_zh="在遭遇极端黑天鹅或强单边暴跌行情时，可能出现“越跌越买/扛单破止损”风险，需严格设定 ATR 止损保护。",
         default_params={"window": 20, "num_std": 2.0, "rsi_period": 14, "rsi_oversold": 30.0, "rsi_overbought": 70.0},
-        param_descriptions={
-            "window": "布林带移动平均基准周期，通常设置为 20 日",
-            "num_std": "标准差倍数通道宽度，2.0 对应 95.4% 的正态置信区间",
-            "rsi_period": "相对强弱指标 RSI 统计周期",
-            "rsi_oversold": "超卖阈值线（低于该值视为情绪恐慌超跌）",
-            "rsi_overbought": "超买阈值线（高于该值视为情绪亢奋过热）",
+        param_schemas={
+            "window": {
+                "name": "Bollinger Band Window",
+                "default_value": 20,
+                "valid_range": "[10, 100] bars",
+                "description_en": "Lookback window for the moving average and rolling standard deviation.",
+                "description_zh": "布林带移动平均基准周期，通常设置为 20 日。",
+            },
+            "num_std": {
+                "name": "Standard Deviation Multiplier",
+                "default_value": 2.0,
+                "valid_range": "[1.0, 3.5]",
+                "description_en": "Band width multiplier; 2.0 corresponds to a 95.4% normal distribution confidence interval.",
+                "description_zh": "标准差倍数通道宽度，2.0 对应 95.4% 的正态置信区间。",
+            },
+            "rsi_period": {
+                "name": "RSI Period",
+                "default_value": 14,
+                "valid_range": "[5, 30] bars",
+                "description_en": "Relative Strength Index momentum evaluation window.",
+                "description_zh": "相对强弱指标 RSI 统计周期。",
+            },
+            "rsi_oversold": {
+                "name": "RSI Oversold Level",
+                "default_value": 30.0,
+                "valid_range": "[10.0, 45.0]",
+                "description_en": "Exhaustion threshold below which asset is considered deeply oversold.",
+                "description_zh": "超卖阈值线（低于该值视为情绪恐慌超跌）。",
+            },
         },
     )
+
 
   def __init__(
 

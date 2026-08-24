@@ -16,18 +16,40 @@ class CrossSectionalMomentumStrategy(BaseStrategy):
         id="momentum",
         name="Cross-Sectional Factor Momentum",
         category="Factor Momentum",
-        philosophy="截面多资产动量效应（Jegadeesh & Titman 经典理论）：在资产池内部，过去表现最强的资产（Winners）在未来一段周期内会继续跑赢表现最差的资产（Losers）。",
-        mechanics="每隔 N 个周期对资产池全量标的按过去 Lookback 周期累积收益打分排序，按反波动率风险平价权重做多 Top 领头羊，做空/减持 Bottom 滞涨股。",
-        suitable_regime="板块轮动加速行情、结构性分化牛市、科技成长龙头主升浪。",
-        risk_profile="在遭遇市场风格剧烈切换（如高低切换、价值防御突发跑赢成长动量）时，可能发生“动量崩溃（Momentum Crash）”。",
+        philosophy_en="Cross-sectional momentum anomaly (Jegadeesh & Titman): within a multi-asset universe, top trailing performers (Winners) systematically outperform laggards (Losers) over intermediate investment horizons.",
+        philosophy_zh="截面多资产动量效应（Jegadeesh & Titman 经典理论）：在资产池内部，过去表现最强的资产（Winners）在未来一段周期内会继续跑赢表现最差的资产（Losers）。",
+        mechanics_en="Ranks full universe by cumulative trailing returns every N bars, allocating to Top-K winners with inverse-volatility risk parity weighting, and underweighting/shorting bottom laggards.",
+        mechanics_zh="每隔 N 个周期对资产池全量标的按过去 Lookback 周期累积收益打分排序，按反波动率风险平价权重做多 Top 领头羊，做空/减持 Bottom 滞涨股。",
+        suitable_regime_en="Broad macro bull expansions, sector rotation trends, and structural growth leadership phases.",
+        suitable_regime_zh="板块轮动加速行情、结构性分化牛市、科技成长龙头主升浪。",
+        risk_profile_en="Vulnerable to sharp factor reversals and 'Momentum Crashes' when defensive value abruptly outperforms high-beta growth.",
+        risk_profile_zh="在遭遇市场风格剧烈切换（如高低切换、价值防御突发跑赢成长动量）时，可能发生“动量崩溃（Momentum Crash）”。",
         default_params={"lookback": 20, "top_k": 2, "rebalance_interval": 5, "allow_short": True},
-        param_descriptions={
-            "lookback": "动量回溯收益率统计周期（天数）",
-            "top_k": "多头组合选取的头部最强资产数量",
-            "rebalance_interval": "组合再平衡调仓频率（K线根数）",
-            "allow_short": "是否启用对冲做空末尾弱势标的",
+        param_schemas={
+            "lookback": {
+                "name": "Lookback Period",
+                "default_value": 20,
+                "valid_range": "[5, 60] bars",
+                "description_en": "Trailing window used to calculate asset performance return ranking scores.",
+                "description_zh": "动量回溯收益率统计周期（天数/K线根数）。",
+            },
+            "top_k": {
+                "name": "Top Selected Assets",
+                "default_value": 2,
+                "valid_range": "[1, 10]",
+                "description_en": "Number of top-ranked winner assets to include in the long portfolio basket.",
+                "description_zh": "多头组合选取的头部最强资产数量。",
+            },
+            "rebalance_interval": {
+                "name": "Rebalance Frequency",
+                "default_value": 5,
+                "valid_range": "[1, 20] bars",
+                "description_en": "Periodic interval for recalculating factor weights and portfolio rebalancing.",
+                "description_zh": "组合再平衡调仓频率（K线根数）。",
+            },
         },
     )
+
 
   def __init__(
 

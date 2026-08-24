@@ -1,23 +1,39 @@
 import React, { useState } from 'react';
 
+export interface StrategyParamSchemaMeta {
+  name: string;
+  default_value: any;
+  valid_range: string;
+  description_en: string;
+  description_zh: string;
+}
+
 export interface StrategyExplainabilityMeta {
   id: string;
   name: string;
   category: string;
   description: string;
-  philosophy?: string;
-  mechanics?: string;
-  suitable_regime?: string;
-  risk_profile?: string;
+  philosophy_en?: string;
+  philosophy_zh?: string;
+  mechanics_en?: string;
+  mechanics_zh?: string;
+  suitable_regime_en?: string;
+  suitable_regime_zh?: string;
+  risk_profile_en?: string;
+  risk_profile_zh?: string;
   default_params?: Record<string, any>;
-  param_descriptions?: Record<string, string>;
+  param_schemas?: Record<string, StrategyParamSchemaMeta>;
 }
 
 interface StrategyExplainabilityCardProps {
   strategy: StrategyExplainabilityMeta | null;
+  currentParams?: Record<string, any>;
 }
 
-export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProps> = ({ strategy }) => {
+export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProps> = ({
+  strategy,
+  currentParams = {},
+}) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
   if (!strategy) return null;
@@ -45,7 +61,7 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
           userSelect: 'none',
         }}
         onClick={() => setIsExpanded((prev) => !prev)}
-        title="点击展开/收起策略深度解析"
+        title="Toggle Strategy Deep Breakdown"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '18px' }}>🧠</span>
@@ -69,7 +85,7 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
               </span>
             </div>
             <div style={{ fontSize: '12px', color: '#8e8e93', marginTop: '2px' }}>
-              Strategy Whitebox Breakdown & Quantitative Philosophy (策略白盒解析与量化逻辑)
+              Strategy Whitebox Breakdown & Quantitative Rationale
             </div>
           </div>
         </div>
@@ -87,7 +103,7 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
             cursor: 'pointer',
           }}
         >
-          {isExpanded ? '收起 ▲' : '展开详情 ▼'}
+          {isExpanded ? 'Collapse ▲' : 'Expand Details ▼'}
         </button>
       </div>
 
@@ -103,7 +119,7 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
             gap: '14px',
           }}
         >
-          {/* Section 1: Quantitative Philosophy */}
+          {/* Section 1: Philosophy */}
           <div
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.02)',
@@ -114,16 +130,21 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
               <span style={{ fontSize: '13px' }}>💡</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ffd60a', textTransform: 'uppercase' }}>
-                量化核心思路 (Philosophy)
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ffd60a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                Philosophy
               </span>
             </div>
-            <p style={{ fontSize: '12.5px', color: '#e5e5ea', margin: 0, lineHeight: 1.55 }}>
-              {strategy.philosophy || strategy.description}
+            <p style={{ fontSize: '12.5px', color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.5, fontWeight: 500 }}>
+              {strategy.philosophy_en || strategy.description}
             </p>
+            {strategy.philosophy_zh && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+                {strategy.philosophy_zh}
+              </p>
+            )}
           </div>
 
-          {/* Section 2: Execution Mechanics */}
+          {/* Section 2: Mechanics */}
           <div
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.02)',
@@ -134,16 +155,21 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
               <span style={{ fontSize: '13px' }}>⚡</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#30d158', textTransform: 'uppercase' }}>
-                执行机制与风控 (Mechanics)
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#30d158', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                Mechanics
               </span>
             </div>
-            <p style={{ fontSize: '12.5px', color: '#e5e5ea', margin: 0, lineHeight: 1.55 }}>
-              {strategy.mechanics || '依据实时行情计算多空目标仓位并生成委托订单。'}
+            <p style={{ fontSize: '12.5px', color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.5, fontWeight: 500 }}>
+              {strategy.mechanics_en || 'Evaluates real-time price signals to generate execution orders.'}
             </p>
+            {strategy.mechanics_zh && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+                {strategy.mechanics_zh}
+              </p>
+            )}
           </div>
 
-          {/* Section 3: Suitable Market Regime */}
+          {/* Section 3: Suitable Regime */}
           <div
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.02)',
@@ -154,13 +180,18 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
               <span style={{ fontSize: '13px' }}>🌊</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64d2ff', textTransform: 'uppercase' }}>
-                最佳适用行情 (Suitable Regime)
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64d2ff', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                Suitable Regime
               </span>
             </div>
-            <p style={{ fontSize: '12.5px', color: '#e5e5ea', margin: 0, lineHeight: 1.55 }}>
-              {strategy.suitable_regime || '常规活跃交易市场。'}
+            <p style={{ fontSize: '12.5px', color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.5, fontWeight: 500 }}>
+              {strategy.suitable_regime_en || 'Standard active market liquidity.'}
             </p>
+            {strategy.suitable_regime_zh && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+                {strategy.suitable_regime_zh}
+              </p>
+            )}
           </div>
 
           {/* Section 4: Risk Profile */}
@@ -174,17 +205,22 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
               <span style={{ fontSize: '13px' }}>🛡️</span>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ff453a', textTransform: 'uppercase' }}>
-                潜在风险与失效场景 (Risk Profile)
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ff453a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                Risk Profile
               </span>
             </div>
-            <p style={{ fontSize: '12.5px', color: '#e5e5ea', margin: 0, lineHeight: 1.55 }}>
-              {strategy.risk_profile || '受底层资产系统性波动影响。'}
+            <p style={{ fontSize: '12.5px', color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.5, fontWeight: 500 }}>
+              {strategy.risk_profile_en || 'Subject to underlying asset volatility.'}
             </p>
+            {strategy.risk_profile_zh && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+                {strategy.risk_profile_zh}
+              </p>
+            )}
           </div>
 
-          {/* Section 5: Parameter Breakdown */}
-          {strategy.param_descriptions && Object.keys(strategy.param_descriptions).length > 0 && (
+          {/* Section 5: Configurable Parameters */}
+          {strategy.param_schemas && Object.keys(strategy.param_schemas).length > 0 && (
             <div
               style={{
                 gridColumn: '1 / -1',
@@ -194,19 +230,78 @@ export const StrategyExplainabilityCard: React.FC<StrategyExplainabilityCardProp
                 padding: '12px 14px',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                 <span style={{ fontSize: '13px' }}>⚙️</span>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#64d2ff', textTransform: 'uppercase' }}>
-                  策略可调参数指南 (Configurable Parameters Guide)
+                <span style={{ fontSize: '12px', fontWeight: 800, color: '#64d2ff', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Configurable Parameters
                 </span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
-                {Object.entries(strategy.param_descriptions).map(([paramName, desc]) => (
-                  <div key={paramName} style={{ fontSize: '12px', color: '#d1d1d6' }}>
-                    <span style={{ color: '#00e5ff', fontFamily: 'monospace', fontWeight: 700 }}>{paramName}</span>:{' '}
-                    <span style={{ color: '#e5e5ea' }}>{desc}</span>
-                  </div>
-                ))}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                {Object.entries(strategy.param_schemas).map(([paramKey, schema]) => {
+                  const currentValue = currentParams[paramKey] !== undefined ? currentParams[paramKey] : schema.default_value;
+
+                  return (
+                    <div
+                      key={paramKey}
+                      style={{
+                        backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '6px',
+                        padding: '10px 12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ color: '#00e5ff', fontFamily: 'monospace', fontWeight: 800, fontSize: '12.5px' }}>
+                            {paramKey}
+                          </span>
+                          <span style={{ color: '#8e8e93', fontSize: '11px', fontWeight: 600 }}>
+                            ({schema.name})
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span
+                            style={{
+                              backgroundColor: 'rgba(48, 209, 88, 0.15)',
+                              color: '#30d158',
+                              border: '1px solid rgba(48, 209, 88, 0.3)',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              fontWeight: 700,
+                            }}
+                            title="Active value used in backtest"
+                          >
+                            Value: {String(currentValue)}
+                          </span>
+                          <span
+                            style={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                              color: '#aeaeb2',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10.5px',
+                              fontFamily: 'monospace',
+                            }}
+                            title="Valid parameter range"
+                          >
+                            Range: {schema.valid_range}
+                          </span>
+                        </div>
+                      </div>
+
+                      <p style={{ fontSize: '11.5px', color: '#e5e5ea', margin: '0 0 3px 0', lineHeight: 1.4 }}>
+                        {schema.description_en}
+                      </p>
+                      <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0, lineHeight: 1.4 }}>
+                        {schema.description_zh}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

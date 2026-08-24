@@ -7,17 +7,34 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
+class StrategyParamSchema:
+  """Schema definition for a strategy parameter with ranges and descriptions."""
+  name: str
+  default_value: Any
+  valid_range: str
+  description_en: str
+  description_zh: str
+
+  def to_dict(self) -> Dict[str, Any]:
+    return asdict(self)
+
+
+@dataclass(frozen=True)
 class StrategyMetadata:
   """Institutional metadata and explainability definition for a trading strategy."""
   id: str
   name: str
   category: str
-  philosophy: str
-  mechanics: str
-  suitable_regime: str
-  risk_profile: str
+  philosophy_en: str
+  philosophy_zh: str
+  mechanics_en: str
+  mechanics_zh: str
+  suitable_regime_en: str
+  suitable_regime_zh: str
+  risk_profile_en: str
+  risk_profile_zh: str
   default_params: Dict[str, Any]
-  param_descriptions: Dict[str, str]
+  param_schemas: Dict[str, Dict[str, Any]]
 
   def to_dict(self) -> Dict[str, Any]:
     return asdict(self)
@@ -77,13 +94,18 @@ class BaseStrategy(ABC):
         id="base_strategy",
         name="Base Alpha Strategy",
         category="General",
-        philosophy="General market execution baseline.",
-        mechanics="Processes synchronized bar events and manages inventory positions.",
-        suitable_regime="All market conditions.",
-        risk_profile="Subject to underlying asset market volatility.",
+        philosophy_en="General systematic market execution baseline.",
+        philosophy_zh="通用系统化市场执行基准模型。",
+        mechanics_en="Processes synchronized bar events and manages inventory positions.",
+        mechanics_zh="处理同步周期行情事件并管理持仓头寸。",
+        suitable_regime_en="All market conditions and liquidity tiers.",
+        suitable_regime_zh="全天候市场环境与常规流动性标的。",
+        risk_profile_en="Subject to underlying asset market volatility.",
+        risk_profile_zh="受底层资产系统性市场波动影响。",
         default_params={},
-        param_descriptions={},
+        param_schemas={},
     )
+
 
   @abstractmethod
   def on_bar(self, bar: Any) -> None:

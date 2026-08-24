@@ -1793,26 +1793,34 @@ describe('Bulldog Alpha Web Console', () => {
         expect(screen.getByTestId('strategy-explainability-card')).toBeInTheDocument();
       });
 
-      // Verify header, category badge and key breakdown sections
+      // Verify header, category badge and English breakdown section titles
       expect(screen.getAllByText(/Dual EMA Momentum Trend Follower/i).length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('Trend Following')).toBeInTheDocument();
-      expect(screen.getByText(/量化核心思路 \(Philosophy\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/执行机制与风控 \(Mechanics\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/最佳适用行情 \(Suitable Regime\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/潜在风险与失效场景 \(Risk Profile\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/策略可调参数指南/i)).toBeInTheDocument();
+      expect(screen.getByText('Philosophy')).toBeInTheDocument();
+      expect(screen.getByText('Mechanics')).toBeInTheDocument();
+      expect(screen.getByText('Suitable Regime')).toBeInTheDocument();
+      expect(screen.getByText('Risk Profile')).toBeInTheDocument();
+      expect(screen.getByText('Configurable Parameters')).toBeInTheDocument();
 
+      // Verify English and Chinese descriptions
+      expect(screen.getByText(/Asset prices exhibit serial autocorrelation and momentum clustering/i)).toBeInTheDocument();
+      expect(screen.getByText(/资产价格呈现序列自相关性与动量聚集效应/i)).toBeInTheDocument();
+
+      // Verify Parameter Value and Range badges
+      expect(screen.getByText(/Value: 10/i)).toBeInTheDocument();
+      expect(screen.getByText(/Range: \[2, 50\] bars/i)).toBeInTheDocument();
 
       // Test collapse / expand toggle
-      const collapseBtn = screen.getByText('收起 ▲');
+      const collapseBtn = screen.getByText('Collapse ▲');
       fireEvent.click(collapseBtn);
-      expect(screen.queryByText(/量化核心思路 \(Philosophy\)/i)).not.toBeInTheDocument();
-      expect(screen.getByText('展开详情 ▼')).toBeInTheDocument();
+      expect(screen.queryByText('Philosophy')).not.toBeInTheDocument();
+      expect(screen.getByText('Expand Details ▼')).toBeInTheDocument();
 
       // Click to re-expand
-      fireEvent.click(screen.getByText('展开详情 ▼'));
-      expect(screen.getByText(/量化核心思路 \(Philosophy\)/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Expand Details ▼'));
+      expect(screen.getByText('Philosophy')).toBeInTheDocument();
     });
+
 
     test('Control Panel modifies strategy, symbol basket and fast presets', async () => {
       await act(async () => {
